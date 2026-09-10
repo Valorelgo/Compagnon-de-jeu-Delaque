@@ -74,7 +74,12 @@ function renderMedicalStep() {
     let html = `
         <h3>1. Soins Médicaux et Convalescence</h3>
         <p style="color:#aaa; font-size:13px;">Gérez les blessures des combattants sortis hors de combat lors de la dernière bataille.</p>
-        <div style="background:#0f172a; border:1px solid #1e293b; border-radius:6px; padding:10px 14px; margin:10px 0 14px 0; font-size:12px; color:#cbd5e1; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        
+        <div style="background:#0f172a; border:1px solid #1e293b; border-radius:6px; padding:10px 14px; margin:10px 0 10px 0; font-size:12px; color:#cbd5e1;">
+            🛡️ <strong>Règle Déroute & Fuite :</strong> Les fuyards sont protégés et ne subissent pas les conséquences d'une mise hors de combat (pas de jet de blessure permanente), sauf s'ils étaient déjà sérieusement blessés avant de fuir (auquel cas ils devront effectuer le jet de blessure permanente).
+        </div>
+
+        <div style="background:#141820; border:1px solid #242b38; border-radius:6px; padding:10px 14px; margin:10px 0 14px 0; font-size:12px; color:#cbd5e1; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
             <span>ℹ️ <strong>Règle Necromunda :</strong> Valider le Post-Cycle (Nouveau Cycle) rétablit automatiquement tous les combattants en <em>Recovery</em>.</span>
             ${recoveryCount > 0 ? `<button class="btn btn-cyan" style="padding:4px 10px; font-size:12px; margin:0;" onclick="clearAllRecoveries()">Rétablir toutes les convalescences (${recoveryCount})</button>` : ''}
         </div>
@@ -207,6 +212,42 @@ function renderXPStep() {
         <h3>2. Expérience & Avancements des Guerriers</h3>
         <p style="color:#aaa; font-size:13px;">Attribuez les points d'XP remportés et achetez des augmentations de caractéristiques ou de nouvelles compétences / pouvoirs psychoteric wyrd.</p>
     `;
+
+    if (window.gameState && window.gameState.lastBattleRecap && window.gameState.lastBattleRecap.length > 0) {
+        let recap = window.gameState.lastBattleRecap;
+        html += `
+            <div style="background:#141820; border:1px solid var(--accent-cyan); border-radius:6px; padding:14px; margin-bottom:16px;">
+                <h4 style="color:var(--accent-cyan); margin:0 0 6px 0; font-size:15px; display:flex; align-items:center; gap:8px;">
+                    <span>⭐</span> Bilan d'Expérience de la Dernière Bataille
+                </h4>
+                <p style="font-size:12px; color:#cbd5e1; margin:0 0 10px 0;">
+                    Un guerrier ne peut <strong>jamais perdre l'expérience (XP)</strong> acquise pendant une partie.
+                    Même s'il finit la partie <strong>Hors de combat 💀</strong> ou <strong>Fuyard 🏃</strong>, il conserve l'XP liée à sa participation (+1) ainsi qu'à ses accomplissements.
+                </p>
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:8px;">
+                    ${recap.map(r => {
+                        let stateLabel = r.state === 'out_of_action' ? '💀 Hors de Combat' : (r.state === 'fled' ? '🏃 Fuyard' : '✓ Debout');
+                        let stateColor = r.state === 'out_of_action' ? '#ef4444' : (r.state === 'fled' ? '#94a3b8' : '#10b981');
+                        return `
+                            <div style="background:#0c0e12; border:1px solid #242b38; border-radius:4px; padding:8px 10px; font-size:12px;">
+                                <div style="display:flex; justify-content:space-between; align-items:center;">
+                                    <strong style="color:#fff;">${escapeHtml(r.name)}</strong>
+                                    <span style="font-size:10px; padding:1px 6px; border-radius:3px; font-weight:bold; background:${stateColor}22; color:${stateColor}; border:1px solid ${stateColor};">
+                                        ${stateLabel}
+                                    </span>
+                                </div>
+                                <div style="color:#cbd5e1; margin-top:4px;">
+                                    Gain bataille : <strong style="color:var(--accent-cyan);">+${r.totalGained} XP</strong> 
+                                    <span style="color:#64748b; font-size:11px;">(1 part. + ${r.featsXP} expl.)</span>
+                                    | Total actuel : <strong style="color:#fff;">${r.newTotalXP} XP</strong>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        `;
+    }
 
     html += currentGang.members.map((m, idx) => {
         let xp = m.xp || 0;
