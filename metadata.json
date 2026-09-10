@@ -1,0 +1,6 @@
+{
+  "name": "Necromunda Delaque Gang Companion",
+  "description": "Compagnon de gestion et de campagne pour le gang Delaque dans Necromunda : recrutement, pouvoirs psychoteric wyrd, suivi de gang, combat et post-cycle.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
