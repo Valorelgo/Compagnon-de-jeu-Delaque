@@ -290,7 +290,7 @@ function removeFighter(idx) {
         // et son matériel disparaît sans passer par la réserve (le stash
         // n'entre en jeu qu'après validation du gang).
         bodyMsg = `Voulez-vous vraiment licencier <strong>${m.customName}</strong> (${m.charName}) ?<br><br>
-        <small style="color:#aaa; font-size:13px;">La création du gang n'est pas encore validée : son coût total (<strong>${m.totalCost || 0} cr</strong>, armes et équipements compris) sera intégralement remboursé à la trésorerie du gang. Son matériel ne rejoint pas la réserve (Stash) : il disparaît avec lui/elle.</small>`;
+        <small style="color:#aaa; font-size:13px;">La création du gang n'est pas encore validée : son coût total (<strong>${m.totalCost || 0} cr</strong>, armes et équipements compris) sera intégralement remboursé à la trésorerie du gang. Son matériel ne rejoint pas la réserve (Stash) : il disparaît avec lui/elle. Un éventuel familier rattaché rejoint en revanche le stash, récupérable par un autre guerrier.</small>`;
     } else {
         bodyMsg = `Voulez-vous vraiment licencier <strong>${m.customName}</strong> (${m.charName}) ?<br><br>
         <small style="color:#aaa; font-size:13px;">${gearVanishes
@@ -317,22 +317,33 @@ function performRemoveFighter(idx) {
     let toastMsg;
 
     if (isCreation) {
+        // Coût de base + armes + équipements (hors familiers, dont le coût
+        // n'est plus jamais inclus dans totalCost depuis la correction de
+        // calculateFighterCost — voir costPrepaid) : remboursé intégralement,
+        // sans passer par le stash.
         let refund = m.totalCost || 0;
         currentGang.credits = (currentGang.credits || 0) + refund;
 
-        // Un familier acheté pour ce combattant pendant la création (référencé
-        // via familiarMemberId sur l'entrée d'équipement) est déjà compté dans
-        // ce refund (son coût est inclus dans totalCost du propriétaire, comme
-        // à l'achat). On le retire simplement du roster, sans remboursement
-        // supplémentaire ni passage par le stash, sous peine de le rembourser
-        // deux fois.
+        // Un familier attaché à ce combattant n'est ni remboursé en crédits,
+        // ni perdu : comme en campagne (licenciement/mort), il rejoint le
+        // stash sous forme d'objet "Familier" que n'importe quel autre
+        // guerrier pourra reprendre gratuitement (adoptFamiliarFromStash).
+        let hadFamiliar = false;
         (m.equipment || []).forEach(e => {
             if (e && e.familiarMemberId) {
+                hadFamiliar = true;
+                if (!currentGang.stash) currentGang.stash = [];
+                currentGang.stash.push({
+                    name: e.name,
+                    type: 'Familier',
+                    cost: e.cost_credits || e.cost || 0,
+                    familiarCharId: e.familiarCharId
+                });
                 currentGang.members = currentGang.members.filter(fm => fm.id !== e.familiarMemberId);
             }
         });
 
-        toastMsg = `${m.customName} a été licencié(e). ${refund} cr remboursé(s) à la trésorerie du gang.`;
+        toastMsg = `${m.customName} a été licencié(e). ${refund} cr remboursé(s) à la trésorerie du gang.${hadFamiliar ? " Son familier rejoint la réserve du gang (récupérable par un autre guerrier)." : ""}`;
     } else {
         transferFighterGearToStash(m);
         toastMsg = `${m.customName} a été licencié(e). ${shouldFighterGearVanish(m) ? "Son équipement a disparu avec lui/elle." : "Ses armes et équipements ont rejoint la réserve du gang."}`;
