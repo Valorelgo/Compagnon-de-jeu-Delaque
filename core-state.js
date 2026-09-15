@@ -676,7 +676,7 @@ function calculateFighterCost(m) {
     (m.equipment || []).forEach(e => {
         if (!e) return;
         const isDefault = e.isDefault || (char.default_equipment && (char.default_equipment.includes(e.id) || char.default_equipment.includes(e.name)));
-        if (!isDefault) {
+        if (!isDefault && !e.costPrepaid) {
             total += (e.cost_credits || e.cost || 0);
         }
     });
