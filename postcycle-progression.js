@@ -144,6 +144,39 @@ function quickEquipStashItem(itemName, fighterId) {
 
     let stItem = currentGang.stash[sIdx];
     let itemType = (typeof stItem === 'object' && stItem.type) ? stItem.type : '';
+
+    // Un familier de la réserve n'est pas un objet ordinaire : reprendre sa
+    // fiche complète (stats, armes, compétences), comme à l'achat ou à la
+    // reprise depuis la fiche du combattant (voir adoptFamiliarFromStash),
+    // plutôt que de l'ajouter tel quel comme une ligne d'équipement inerte.
+    if (itemType === 'Familier') {
+        let charDef = (typeof stItem === 'object' && stItem.familiarCharId) ? db.characters.find(c => c.id === stItem.familiarCharId) : null;
+        if (!charDef) return showToast("Profil de familier introuvable dans la réserve.", "error");
+
+        currentGang.stash.splice(sIdx, 1);
+
+        let familiarMember = createFamiliarMemberObject(charDef, m.id);
+        currentGang.members.push(familiarMember);
+
+        if (!m.equipment) m.equipment = [];
+        m.equipment.push({
+            id: 'famref_' + familiarMember.id,
+            name: charDef.name,
+            type: 'Familier',
+            cost_credits: charDef.cost || 0,
+            familiarMemberId: familiarMember.id,
+            familiarCharId: charDef.id,
+            costPrepaid: true,
+            fromStash: true
+        });
+
+        calculateGangRating(currentGang);
+        saveGangs();
+        showToast(`"${charDef.name}" (repris de la réserve) est rattaché à ${m.customName} !`, "success");
+        openStashModal();
+        return;
+    }
+
     let isGrenade = (typeof stItem === 'object' && (stItem.type === 'Grenade' || stItem.counts_as_equip || (stItem.id && ((stItem.id.startsWith('wpn_grenade_') && stItem.id !== 'wpn_grenade_launcher') || stItem.id === 'wpn_charge_demo'))));
     let isWeapon = itemType === 'Arme' && !isGrenade;
 
