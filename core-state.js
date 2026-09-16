@@ -653,6 +653,15 @@ function calculateFighterCost(m) {
     const char = db.characters.find(c => c.id === m.charId);
     if (!char) return 0;
     let total = char.cost;
+
+    // Option Wyrd (Master of shadows / Phantom) : +coût fixe défini sur le
+    // profil, appliqué tant que le combattant a activé l'option (voir
+    // toggleWyrdOption). Les personnages nativement wyrd (Psy-Gheist,
+    // Piscean Spektor) n'ont pas ce champ : rien n'est ajouté pour eux ici,
+    // leur coût de base l'inclut déjà.
+    if (m.wyrdOptionActive && char.wyrd_option) {
+        total += (char.wyrd_option.cost || 0);
+    }
     
     (m.weapons || []).forEach(w => {
         if (!w) return;
