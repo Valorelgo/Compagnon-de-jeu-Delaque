@@ -411,6 +411,7 @@ function editFighter(idx) {
 function renderFighterEdit(container) {
     const m = tempFighter;
     m.totalCost = calculateFighterCost(m);
+    const char = db.characters.find(c => c.id === m.charId);
 
     let types = (m.type || []).map(t => t.toLowerCase());
     let isBeast = types.includes("bête") || types.includes("bette");
@@ -508,6 +509,15 @@ function renderFighterEdit(container) {
     }
 
     html += `
+    ${char && char.wyrd_option && !isPostCycleEquip && (!currentGang.isEstablished || appState.editTarget === null) ? `
+            <div style="background:#181828; border:1px solid var(--accent-purple); border-radius:6px; padding:10px 12px; margin:15px 0;">
+                <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer; margin:0;">
+                    <input type="checkbox" style="width:16px; height:16px; margin-top:2px; flex-shrink:0;" ${m.wyrdOptionActive ? 'checked' : ''} onchange="toggleWyrdOption(this.checked)">
+                    <span>${char.wyrd_option.label}</span>
+                </label>
+            </div>
+    ` : ''}
+
             <h3 style="margin-top:15px;">Compétences</h3>
             <div id="skills-list">
                 ${m.skills.length === 0 ? '<p>Aucune compétence sélectionnée.</p>' : m.skills.map((s, i) => {
