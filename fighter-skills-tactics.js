@@ -5,6 +5,37 @@
 // Dépendances : les 4 fichiers précédents. Doit rester le DERNIER fichier issu
 // de l'ancien app.js à charger : c'est lui qui déclenche initApp() au chargement.
 
+// Active/désactive l'option payante "Wyrd" (Master of shadows / Phantom) :
+// bascule le type du combattant (débloque la catégorie Psychoteric wyrd) et
+// ajuste son coût. IMPORTANT : tempFighter.type partage sa référence avec le
+// profil dans db.characters tant qu'il n'a pas été réassigné (voir
+// recruitFighter) — on construit donc toujours un NOUVEAU tableau ici plutôt
+// que de muter l'existant, pour ne jamais altérer le profil de base partagé
+// par tous les futurs recrutements de ce personnage.
+function toggleWyrdOption(checked) {
+    if (!tempFighter) return;
+    const char = db.characters.find(c => c.id === tempFighter.charId);
+    if (!char || !char.wyrd_option) return;
+
+    let currentTypes = tempFighter.type || [];
+    let hasWyrdType = currentTypes.some(t => String(t).toLowerCase() === 'wyrd');
+
+    if (checked && !hasWyrdType) {
+        tempFighter.type = [...currentTypes, 'wyrd'];
+    } else if (!checked && hasWyrdType) {
+        tempFighter.type = currentTypes.filter(t => String(t).toLowerCase() !== 'wyrd');
+        // La catégorie n'étant plus accessible sans l'option, on retire toute
+        // compétence Psychoteric wyrd déjà sélectionnée.
+        if (tempFighter.skills && tempFighter.skills.length && db.skills.psychoteric_wyrd) {
+            let wyrdIds = db.skills.psychoteric_wyrd.map(s => s.id);
+            tempFighter.skills = tempFighter.skills.filter(s => !wyrdIds.includes(s && s.id));
+        }
+    }
+
+    tempFighter.wyrdOptionActive = checked;
+    renderFighterEdit(document.getElementById('main-content'));
+}
+
 // ==========================================
 // GESTION DES COMPÉTENCES (CRÉATION)
 // ==========================================
@@ -13,10 +44,15 @@ function openSkillModal() {
     const char = db.characters.find(c => c.id === tempFighter.charId);
     if (!char) return;
 
-    let types = (char.type || []).map(t => t.toLowerCase());
+    // On lit le type EFFECTIF du combattant (tempFighter.type), pas le profil
+    // statique (char.type) : c'est lui qui reflète l'option Wyrd activée sur
+    // ce combattant précis (Master of shadows / Phantom), en plus du type
+    // inné des personnages qui l'ont nativement (Psy-Gheist, Piscean Spektor).
+    let types = (tempFighter.type && tempFighter.type.length ? tempFighter.type : (char.type || [])).map(t => String(t).toLowerCase());
     let isLeaderOrChampion = types.includes("leader") || types.includes("champion");
     let isProspectOrBeast = types.includes("prospect") || types.includes("bête") || types.includes("bette");
     let isSpecialist = types.includes("spécialiste") || types.includes("specialiste");
+    let isWyrd = types.includes("wyrd");
 
     const norm = s => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
@@ -30,7 +66,24 @@ function openSkillModal() {
 
     let html = `<div style="max-height:60vh; overflow-y:auto;">`;
 
-    if (isProspectOrBeast) {
+    if (isProspectOrBeast && isWyrd && db.skills.psychoteric_wyrd) {
+        // Cas Psy-Gheist / Piscean Spektor : Prospect ou Bête, mais wyrd de
+        // naissance — accès exclusif à la catégorie Psychoteric wyrd pour
+        // choisir leur pouvoir de départ, malgré le blocage habituel des
+        // Prospects/Bêtes sur le reste des compétences.
+        html += `<p style="color:var(--accent-cyan); margin-bottom:10px;">
+            🔮 <strong>Wyrd :</strong> choisissez 1 pouvoir Psychoteric wyrd ci-dessous :
+        </p>`;
+        db.skills.psychoteric_wyrd.forEach(s => {
+            let isChecked = tempFighter.skills.some(sk => sk.id === s.id);
+            html += `
+                <div class="skill-checkbox-group" style="margin-bottom:8px; padding:6px; background:#181818; border-radius:4px; border:1px solid #333;">
+                    <input type="checkbox" id="sk-${s.id}" ${isChecked ? 'checked' : ''} onchange="toggleSkill('psychoteric_wyrd', '${s.id}')">
+                    <label for="sk-${s.id}"><strong>${s.name}</strong> : ${s.desc}</label>
+                </div>
+            `;
+        });
+    } else if (isProspectOrBeast) {
         html += `<p style="color:var(--accent-purple); padding:10px; background:#111; border-radius:5px; border:1px solid #333;">
             ⚠️ Les Prospects et Bêtes n'ont pas accès à la sélection de compétences à la création (uniquement leur compétence de départ).
         </p>`;
@@ -57,7 +110,13 @@ function openSkillModal() {
             let catNorm = norm(cat);
             let isPrimary = primaryCats.includes(catNorm);
             let isSecondary = secondaryCats.includes(catNorm);
-            
+
+            // Catégorie Psychoteric wyrd débloquée EN PLUS des primaires
+            // habituelles (pas à leur place) pour un Master of shadows/Phantom
+            // ayant coché l'option Wyrd (+35 cr).
+            let isWyrdBonusCat = isWyrd && cat === 'psychoteric_wyrd';
+            if (isWyrdBonusCat) isPrimary = true;
+
             let isAllowed = true;
             if (isLeaderOrChampion) {
                 isAllowed = isPrimary;
