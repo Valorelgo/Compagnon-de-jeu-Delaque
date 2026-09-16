@@ -90,7 +90,7 @@ function openSkillModal() {
     }
 
     html += `</div><br><button class="btn" onclick="closeModal()">Fermer</button>`;
-    openModal("Menu des Compétences (Création)", html);
+    openModal("Menu des Compétences (Création)", html, true);
 }
 
 function toggleSpecialistSkill(skillId, cat) {
