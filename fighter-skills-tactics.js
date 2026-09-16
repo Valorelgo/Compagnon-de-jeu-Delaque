@@ -1,791 +1,797 @@
-// postcycle-progression.js (4/4 - issu de l'ancien postbattle.js)
-// Rôle : gestion du stash (réserve du gang) et gestion des territoires.
-// La montée de niveau et les avancées de combattant ont été déplacées dans
-// leur propre fichier (xp-advancement.js) pour garder ce fichier raisonnable.
-// Dépendances : les 3 fichiers précédents + xp-advancement.js. Dernier
-// fichier chargé par l'appli.
+// fighter-skills-tactics.js (5/5 - issu de l'ancien app.js)
+// Rôle : compétences du combattant, sauvegarde/retour de la fiche d'édition,
+// export/import de gang au format JSON, cartes tactiques du gang, et
+// l'initialisation automatique de l'application (point d'entrée initApp()).
+// Dépendances : les 4 fichiers précédents. Doit rester le DERNIER fichier issu
+// de l'ancien app.js à charger : c'est lui qui déclenche initApp() au chargement.
+
 // ==========================================
-// GESTION DU STASH (RÉSERVE) & REVENTE
+// GESTION DES COMPÉTENCES (CRÉATION)
 // ==========================================
-function calculateResellPrice(cost) {
-    if (!cost || cost <= 0) return 0;
-    return Math.ceil((cost / 2) / 5) * 5;
-}
+function openSkillModal() {
+    if (!tempFighter) return;
+    const char = db.characters.find(c => c.id === tempFighter.charId);
+    if (!char) return;
 
-function openStashModal() {
-    if (!currentGang) return;
-    if (!currentGang.stash) currentGang.stash = [];
+    let types = (char.type || []).map(t => t.toLowerCase());
+    let isLeaderOrChampion = types.includes("leader") || types.includes("champion");
+    let isProspectOrBeast = types.includes("prospect") || types.includes("bête") || types.includes("bette");
+    let isSpecialist = types.includes("spécialiste") || types.includes("specialiste");
 
-    let inventoryMap = {};
+    const norm = s => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
-    (currentGang.members || []).forEach(m => {
-        (m.weapons || []).forEach(w => {
-            let wName = w.name;
-            if (!inventoryMap[wName]) inventoryMap[wName] = { type: 'Arme', equipped: 0, stash: 0, cost: w.cost || w.cost_credits || 0 };
-            inventoryMap[wName].equipped++;
+    let primaryCats = (char.primary_skills || []).map(s => norm(s));
+    let secondaryCats = (char.secondary_skills || []).map(s => norm(s));
 
-            if (w.accessory && w.accessory.name) {
-                let accName = w.accessory.name;
-                if (!inventoryMap[accName]) inventoryMap[accName] = { type: 'Accessoire', equipped: 0, stash: 0, cost: w.accessory.cost || 0 };
-                inventoryMap[accName].equipped++;
-            }
-        });
+    const specialistSkillIds = [
+        "sk_biceps_saillants", "sk_tir_hanche", "sk_pistolero", "sk_grimper",
+        "sk_tir_precision", "sk_berserker", "sk_soin", "sk_munitions"
+    ];
 
-        if (m.armor && m.armor.name) {
-            let aName = m.armor.name;
-            if (!inventoryMap[aName]) inventoryMap[aName] = { type: 'Armure', equipped: 0, stash: 0, cost: m.armor.cost || 0 };
-            inventoryMap[aName].equipped++;
+    let html = `<div style="max-height:60vh; overflow-y:auto;">`;
+
+    if (isProspectOrBeast) {
+        html += `<p style="color:var(--accent-purple); padding:10px; background:#111; border-radius:5px; border:1px solid #333;">
+            ⚠️ Les Prospects et Bêtes n'ont pas accès à la sélection de compétences à la création (uniquement leur compétence de départ).
+        </p>`;
+    } else if (isSpecialist) {
+        html += `<p style="color:var(--accent-cyan); margin-bottom:10px;">
+            🎯 <strong>Spécialiste :</strong> Choisissez 1 compétence parmi les 8 spécialités ci-dessous :
+        </p>`;
+
+        for (let cat in db.skills) {
+            db.skills[cat].forEach(s => {
+                if (specialistSkillIds.includes(s.id)) {
+                    let isChecked = tempFighter.skills.some(sk => sk.id === s.id);
+                    html += `
+                        <div class="skill-checkbox-group" style="margin-bottom:8px; padding:6px; background:#181818; border-radius:4px; border:1px solid #333;">
+                            <input type="checkbox" id="sk-${s.id}" ${isChecked ? 'checked' : ''} onchange="toggleSpecialistSkill('${s.id}', '${cat}')">
+                            <label for="sk-${s.id}"><strong>${s.name}</strong> (${cat.toUpperCase()}) : ${s.desc}</label>
+                        </div>
+                    `;
+                }
+            });
         }
-
-        (m.equipment || []).forEach(e => {
-            let eName = e.name;
-            if (!inventoryMap[eName]) inventoryMap[eName] = { type: 'Équipement', equipped: 0, stash: 0, cost: e.cost || e.cost_credits || 0 };
-            inventoryMap[eName].equipped++;
-        });
-    });
-
-    (currentGang.stash || []).forEach(item => {
-        let name = typeof item === 'string' ? item : item.name;
-        let type = (typeof item === 'object' && item.type) ? item.type : 'Matériel';
-        let cost = (typeof item === 'object') ? (item.cost || item.cost_credits || item.price || 0) : 0;
-        
-        if (!inventoryMap[name]) {
-            inventoryMap[name] = { type: type, equipped: 0, stash: 0, cost: cost };
-        }
-        inventoryMap[name].stash++;
-        if (cost > 0 && !inventoryMap[name].cost) inventoryMap[name].cost = cost;
-    });
-
-    let html = `
-        <div style="max-height:60vh; overflow-y:auto;">
-            <p><small>Format <strong>X/Y</strong> : <strong>X</strong> = Équipés sur guerriers / <strong>Y</strong> = Total possédés par le gang. Revente à la moitié (arrondie aux 5 cr supérieurs).</small></p>
-            <p style="font-size:11px; color:#aaa; margin-top:3px;"><em>Règle accessoire : Si une arme est déséquipée et envoyée dans le stash, son accessoire y est également envoyé.</em></p>
-            <p style="font-size:11px; color:#2ecc71; margin-top:3px;"><em>Tout ce qui est "En Stock" peut être équipé gratuitement sur un combattant éligible (ni mercenaire, ni bête/familier). Les accessoires d'arme s'équipent depuis la fiche du combattant (bouton "+ Ajouter un accessoire").</em></p>
-            <hr style="margin:10px 0; border-color:#333;">
-            <table style="width:100%; border-collapse:collapse; text-align:left; font-size:13px;">
-                <thead>
-                    <tr style="border-bottom:2px solid var(--accent-purple, #9b59b6);">
-                        <th style="padding:6px;">Objet / Équipement</th>
-                        <th style="padding:6px;">Type</th>
-                        <th style="padding:6px; text-align:center;">Équipés / Total (X/Y)</th>
-                        <th style="padding:6px; text-align:center;">En Stock</th>
-                        <th style="padding:6px; text-align:right;">Action</th>
-                    </tr>
-                </thead>
-                <tbody>
-    `;
-
-    let eligibleFighters = (currentGang.members || []).filter(m => !isMercOrBeastProfile(m));
-
-    let itemKeys = Object.keys(inventoryMap).sort();
-    if (itemKeys.length === 0) {
-        html += `<tr><td colspan="5" style="padding:15px; text-align:center; color:#888;">Le gang ne possède aucun matériel.</td></tr>`;
     } else {
-        itemKeys.forEach((itemName, rowIdx) => {
-            let data = inventoryMap[itemName];
-            let X = data.equipped;
-            let stashCount = data.stash;
-            let Y = X + stashCount;
-            let sellPrice = calculateResellPrice(data.cost);
-            let cleanName = escapeForJsStr(itemName);
-            let isAccessory = (data.type || '').toLowerCase().includes('accessoire');
-            let canQuickEquip = stashCount > 0 && !isAccessory;
+        for (let cat in db.skills) {
+            let catNorm = norm(cat);
+            let isPrimary = primaryCats.includes(catNorm);
+            let isSecondary = secondaryCats.includes(catNorm);
+            
+            let isAllowed = true;
+            if (isLeaderOrChampion) {
+                isAllowed = isPrimary;
+            }
 
             html += `
-                <tr style="border-bottom:1px solid #222;">
-                    <td style="padding:6px;"><strong>${itemName}</strong></td>
-                    <td style="padding:6px;"><small style="color:#aaa;">${data.type}</small></td>
-                    <td style="padding:6px; text-align:center;"><strong style="color:var(--accent-cyan, #00d2d3);">${X}/${Y}</strong></td>
-                    <td style="padding:6px; text-align:center;">
-                        ${stashCount > 0 ? `<span style="color:#2ecc71;">${stashCount} dispo</span>` : `<span style="color:#888;">0 dispo</span>`}
-                    </td>
-                    <td style="padding:6px; text-align:right;">
-                        <div style="display:flex; gap:6px; justify-content:flex-end; align-items:center; flex-wrap:wrap;">
-                        ${canQuickEquip ? (eligibleFighters.length > 0 ? `
-                            <select id="quickequip-target-${rowIdx}" style="padding:2px 4px; font-size:11px; background:#1a1a1a; color:#fff; border:1px solid #444; border-radius:3px;">
-                                ${eligibleFighters.map(f => `<option value="${f.id}">${f.customName}</option>`).join('')}
-                            </select>
-                            <button class="btn-cyan" style="padding:2px 8px; font-size:11px;" onclick="quickEquipStashItem('${cleanName}', document.getElementById('quickequip-target-${rowIdx}').value)">Équiper</button>
-                        ` : `<small style="color:#888;">Aucun combattant éligible</small>`) : ''}
-                        ${stashCount > 0
-                            ? `<button class="btn btn-cyan" style="padding:2px 8px; font-size:11px;" onclick="sellStashItem('${cleanName}', ${sellPrice})">💰 Vendre (${sellPrice} cr)</button>`
-                            : (!canQuickEquip ? `<span style="color:#555; font-size:11px;">—</span>` : '')}
-                        </div>
-                    </td>
-                </tr>
+                <div class="skill-category" style="margin-bottom:12px; ${isAllowed ? '' : 'opacity:0.35; pointer-events:none; filter:grayscale(1);'}">
+                    <h4 style="margin-bottom:6px; color:${isPrimary ? 'var(--accent-cyan)' : (isSecondary ? 'var(--accent-purple)' : '#888')};">
+                        Catégorie : ${cat.toUpperCase()} ${isPrimary ? '(Primaire)' : (isSecondary ? '(Secondaire)' : (isLeaderOrChampion ? '(Inaccessible)' : ''))}
+                    </h4>
             `;
-        });
+
+            db.skills[cat].forEach(s => {
+                if (s.specific_to) {
+                    let matchChar = tempFighter && tempFighter.charId === s.specific_to;
+                    let matchType = tempFighter && tempFighter.type && tempFighter.type.some(t => String(t).toLowerCase() === s.specific_to.toLowerCase());
+                    if (!matchChar && !matchType) return; // Réservé exclusivement (ex: Lands on their feet, Juggernaut pour Brute)
+                }
+                let isChecked = tempFighter.skills.some(sk => sk.id === s.id);
+                html += `
+                    <div class="skill-checkbox-group" style="margin-bottom:4px;">
+                        <input type="checkbox" id="sk-${s.id}" ${isChecked ? 'checked' : ''} ${isAllowed ? '' : 'disabled'} onchange="toggleSkill('${cat}', '${s.id}')">
+                        <label for="sk-${s.id}"><strong>${s.name}</strong> : ${s.desc}</label>
+                    </div>
+                `;
+            });
+
+            html += `</div>`;
+        }
     }
 
-    html += `
-                </tbody>
-            </table>
-        </div>
-        <br>
-        <button class="btn" onclick="closeModal()">Fermer</button>
-    `;
-
-    if (typeof openModal === 'function') openModal("📦 Réserve du Gang (Stash)", html);
+    html += `</div><br><button class="btn" onclick="closeModal()">Fermer</button>`;
+    openModal("Menu des Compétences (Création)", html);
 }
 
-// Équipe gratuitement un objet du stash sur un combattant, directement depuis la
-// vue d'ensemble de la réserve (sans passer par la fiche complète du combattant).
-// Couvre armes, armures, équipement et grenades ; les accessoires d'arme
-// nécessitent de choisir une arme cible et restent gérés depuis la fiche du
-// combattant (bouton "+ Ajouter un accessoire").
-function quickEquipStashItem(itemName, fighterId) {
-    if (!currentGang || !currentGang.stash) return;
-    let m = currentGang.members.find(x => x.id === fighterId);
-    if (!m) return showToast("Combattant introuvable.", "error");
-    if (isMercOrBeastProfile(m)) return showToast("Ce combattant ne peut pas recevoir de matériel de la réserve.", "error");
+function toggleSpecialistSkill(skillId, cat) {
+    const skillObj = db.skills[cat].find(s => s.id === skillId);
+    if (!skillObj) return;
 
-    let sIdx = currentGang.stash.findIndex(item => (typeof item === 'string' ? item : item.name) === itemName);
-    if (sIdx < 0) return showToast("Cet objet n'est plus disponible dans la réserve.", "error");
+    const specialistSkillIds = [
+        "sk_biceps_saillants", "sk_tir_hanche", "sk_pistolero", "sk_grimper",
+        "sk_tir_precision", "sk_berserker", "sk_soin", "sk_munitions"
+    ];
 
-    let stItem = currentGang.stash[sIdx];
-    let itemType = (typeof stItem === 'object' && stItem.type) ? stItem.type : '';
+    tempFighter.skills = tempFighter.skills.filter(s => !specialistSkillIds.includes(s.id));
 
-    // Un familier de la réserve n'est pas un objet ordinaire : reprendre sa
-    // fiche complète (stats, armes, compétences), comme à l'achat ou à la
-    // reprise depuis la fiche du combattant (voir adoptFamiliarFromStash),
-    // plutôt que de l'ajouter tel quel comme une ligne d'équipement inerte.
-    if (itemType === 'Familier') {
-        let charDef = (typeof stItem === 'object' && stItem.familiarCharId) ? db.characters.find(c => c.id === stItem.familiarCharId) : null;
-        if (!charDef) return showToast("Profil de familier introuvable dans la réserve.", "error");
-
-        currentGang.stash.splice(sIdx, 1);
-
-        let familiarMember = createFamiliarMemberObject(charDef, m.id);
-        currentGang.members.push(familiarMember);
-
-        if (!m.equipment) m.equipment = [];
-        m.equipment.push({
-            id: 'famref_' + familiarMember.id,
-            name: charDef.name,
-            type: 'Familier',
-            cost_credits: charDef.cost || 0,
-            familiarMemberId: familiarMember.id,
-            familiarCharId: charDef.id,
-            costPrepaid: true,
-            fromStash: true
-        });
-
-        calculateGangRating(currentGang);
-        saveGangs();
-        showToast(`"${charDef.name}" (repris de la réserve) est rattaché à ${m.customName} !`, "success");
-        openStashModal();
-        return;
+    let checkbox = document.getElementById(`sk-${skillId}`);
+    if (checkbox && checkbox.checked) {
+        tempFighter.skills.push(JSON.parse(JSON.stringify(skillObj)));
     }
 
-    let isGrenade = (typeof stItem === 'object' && (stItem.type === 'Grenade' || stItem.counts_as_equip || (stItem.id && ((stItem.id.startsWith('wpn_grenade_') && stItem.id !== 'wpn_grenade_launcher') || stItem.id === 'wpn_charge_demo'))));
-    let isWeapon = itemType === 'Arme' && !isGrenade;
+    openSkillModal();
+}
 
-    if (isWeapon) {
-        let usedSlots = (m.weapons || []).reduce((sum, w) => sum + getWeaponSlotCost(w), 0);
-        let slotsNeeded = (itemName && itemName.includes('*')) ? 2 : 1;
-        if (usedSlots + slotsNeeded > 3) {
-            return showToast(`${m.customName} n'a pas assez d'emplacements d'arme disponibles (${usedSlots}/3 utilisés).`, "error");
-        }
-        let foundDbW = (typeof db !== 'undefined' && db.weapons) ? db.weapons.find(w => w.name === itemName) : null;
-        let mountedRestrictionError = (typeof checkMountedWeaponRestriction === 'function') ? checkMountedWeaponRestriction(m, foundDbW || stItem) : null;
-        if (mountedRestrictionError) return showToast(mountedRestrictionError, "error");
-
-        currentGang.stash.splice(sIdx, 1);
-        let newWeapon = foundDbW ? JSON.parse(JSON.stringify(foundDbW)) : JSON.parse(JSON.stringify(stItem));
-        newWeapon.accessory = null;
-        newWeapon.fromStash = true;
-        if (!m.weapons) m.weapons = [];
-        m.weapons.push(newWeapon);
+function toggleSkill(cat, skillId) {
+    const skillObj = db.skills[cat].find(s => s.id === skillId);
+    const existingIdx = tempFighter.skills.findIndex(s => s.id === skillId);
+    
+    if (existingIdx >= 0) {
+        tempFighter.skills.splice(existingIdx, 1);
     } else {
-        let foundDbE = (typeof db !== 'undefined' && db.equipment) ? db.equipment.find(e => e.name === itemName) : null;
-        if (!foundDbE && typeof db !== 'undefined' && db.weapons) foundDbE = db.weapons.find(w => w.name === itemName);
-        let previewE = foundDbE || stItem;
-        let armorError = checkArmorSlotLimit(m, previewE);
-        if (armorError) return showToast(armorError, "error");
-
-        currentGang.stash.splice(sIdx, 1);
-        let newE = foundDbE ? JSON.parse(JSON.stringify(foundDbE)) : JSON.parse(JSON.stringify(stItem));
-        if (isGrenade) {
-            newE.type = "Grenade";
-            newE.counts_as_equip = true;
-            if (!newE.profiles && typeof db !== 'undefined' && db.weapons) {
-                let wRef = db.weapons.find(w => w.name === itemName || w.id === newE.id);
-                if (wRef && wRef.profiles) newE.profiles = wRef.profiles;
-            }
-        }
-        newE.fromStash = true;
-        if (!m.equipment) m.equipment = [];
-        m.equipment.push(newE);
+        tempFighter.skills.push(JSON.parse(JSON.stringify(skillObj)));
     }
-
-    saveGangs();
-    showToast(`"${itemName}" équipé sur ${m.customName} (gratuit, depuis la réserve).`, "success");
-    openStashModal();
 }
 
-function sellStashItem(itemName, sellPrice) {
-    if (!currentGang || !currentGang.stash) return;
+function removeSkill(idx) {
+    tempFighter.skills.splice(idx, 1);
+    renderFighterEdit(document.getElementById('main-content'));
+}
 
-    let idx = currentGang.stash.findIndex(item => (typeof item === 'string' ? item : item.name) === itemName);
-    if (idx === -1) return;
+// ==========================================
+// SAUVEGARDE ET RENVOI DU COMBATTANT
+// ==========================================
+function saveFighter() {
+    if (!tempFighter.customName.trim()) return showToast("Veuillez saisir un nom pour le combattant.", "error");
+    
+    if (tempFighter.charId === 'merc_hive_scum') {
+        let wCost = (tempFighter.weapons || []).reduce((sum, w) => sum + (w.isDefault ? 0 : (w.cost_credits || 0)), 0);
+        let eCost = (tempFighter.equipment || []).reduce((sum, e) => sum + (e.isDefault ? 0 : (e.cost_credits || 0)), 0);
+        if (wCost + eCost > 60) {
+            return showToast(`Dépassement de limite ! Le matériel du Hive Scum ne peut pas dépasser 60 crédits au total (Actuel : ${wCost + eCost} cr).`, "error");
+        }
+    }
+
+    tempFighter.totalCost = calculateFighterCost(tempFighter);
+
+    let creditsToPay = 0;
+
+    if (!currentGang.isEstablished) {
+        let oldCost = 0;
+        if (appState.editTarget !== null) {
+            oldCost = currentGang.members[appState.editTarget].totalCost;
+        }
+        let diff = tempFighter.totalCost - oldCost;
+        if (currentGang.credits - diff < 0) return showToast("Crédits insuffisants !", "error");
+        currentGang.credits -= diff;
+        creditsToPay = diff;
+    } else {
+        if (appState.editTarget === null) {
+            const charDef = db.characters.find(c => c.id === tempFighter.charId);
+            creditsToPay += (charDef ? charDef.cost : 0);
+
+            (tempFighter.weapons || []).forEach(w => {
+                if (!w.fromStash && !w.isDefault) creditsToPay += (w.cost_credits || 0);
+                if (w.accessory && !w.accessory.fromStash && !w.accessory.isDefault) creditsToPay += (w.accessory.cost_credits || 0);
+            });
+            (tempFighter.equipment || []).forEach(e => {
+                if (!e.fromStash && !e.isDefault && !e.costPrepaid) creditsToPay += (e.cost_credits || 0);
+            });
+        } else {
+            let origFighter = currentGang.members[appState.editTarget];
+            
+            const countNewItems = (tempList, origList, getItemName, getAcc) => {
+                let tempCounts = {};
+                (tempList || []).forEach(item => {
+                    if (getAcc) item = item.accessory;
+                    if (!item) return;
+                    if (!item.fromStash && !item.isDefault && !item.costPrepaid) {
+                        let n = getItemName(item);
+                        let cost = item.cost_credits || item.cost || 0;
+                        if (!tempCounts[n]) tempCounts[n] = { count: 0, cost: cost };
+                        tempCounts[n].count++;
+                    }
+                });
+
+                let origCounts = {};
+                (origList || []).forEach(item => {
+                    if (getAcc) item = item.accessory;
+                    if (!item) return;
+                    if (!item.fromStash && !item.isDefault && !item.costPrepaid) {
+                        let n = getItemName(item);
+                        if (!origCounts[n]) origCounts[n] = 0;
+                        origCounts[n]++;
+                    }
+                });
+
+                let totalNewCost = 0;
+                for (let n in tempCounts) {
+                    let diff = tempCounts[n].count - (origCounts[n] || 0);
+                    if (diff > 0) {
+                        totalNewCost += diff * tempCounts[n].cost;
+                    }
+                }
+                return totalNewCost;
+            };
+
+            creditsToPay += countNewItems(tempFighter.weapons, origFighter.weapons, w => w.name, false);
+            creditsToPay += countNewItems(tempFighter.weapons, origFighter.weapons, acc => acc.name, true);
+            creditsToPay += countNewItems(tempFighter.equipment, origFighter.equipment, e => e.name, false);
+        }
+
+        // Options d'armes nouvellement débloquées (ex: Photon flash/Fumigène sur
+        // un Grenade launcher) : chacune coûte son propre extra_cost, en plus du
+        // prix de l'arme. Comparé à la fiche d'origine (aucune si nouvelle recrue)
+        // pour ne facturer que les options ajoutées durant cette session d'édition.
+        let origFighterForOptions = (appState.editTarget !== null) ? currentGang.members[appState.editTarget] : null;
+        (tempFighter.weapons || []).forEach((w, wIdx) => {
+            if (!w.optional_profiles || !w.unlockedOptions || w.unlockedOptions.length === 0) return;
+            let origWeapon = origFighterForOptions ? (origFighterForOptions.weapons || [])[wIdx] : null;
+            let origUnlocked = (origWeapon && origWeapon.unlockedOptions) || [];
+            w.unlockedOptions.forEach(optName => {
+                if (!origUnlocked.includes(optName)) {
+                    let opt = w.optional_profiles.find(op => op.name === optName);
+                    if (opt) creditsToPay += (opt.extra_cost || 0);
+                }
+            });
+        });
+
+        if (creditsToPay > 0) {
+            if (currentGang.credits < creditsToPay) {
+                return showToast(`Crédits insuffisants ! Requis : ${creditsToPay} cr | Disponibles : ${currentGang.credits} cr.`, "error");
+            }
+            currentGang.credits -= creditsToPay;
+        }
+    }
+    
+    // Champ technique de suivi (familiers achetés/adoptés durant cette session
+    // d'édition, voir buyFamiliarForFighter/cancelFighterEdit) : ne doit pas
+    // persister sur la fiche définitive du combattant une fois sauvegardée.
+    delete tempFighter._newFamiliarIds;
+
+    let wasRecruiting = (appState.editTarget === null);
+    let recruitedFighter = tempFighter;
+    let isPostCycle = (appState.returnTo === 'post-cycle');
+
+    if (appState.editTarget === null) {
+        currentGang.members.push(tempFighter);
+    } else {
+        currentGang.members[appState.editTarget] = tempFighter;
+    }
+    
+    if (typeof ensureInnateFighterSkills === 'function') {
+        ensureInnateFighterSkills(currentGang);
+    }
+    calculateGangRating(currentGang);
+    saveGangs();
+
+    if (isPostCycle) {
+        appState.returnTo = null;
+        appState.view = 'post-cycle';
+        if (typeof renderPostCycleView === 'function') {
+            renderPostCycleView(document.getElementById('main-content'));
+        } else {
+            navigate('gang-manage');
+        }
+    } else {
+        navigate('gang-manage');
+    }
+
+    if (wasRecruiting) {
+        handleRecruitTactics(recruitedFighter, isPostCycle);
+    } else {
+        if (typeof showToast === 'function') {
+            showToast(`Équipement mis à jour (${creditsToPay || 0} cr) !`, "success");
+        }
+    }
+}
+
+function removeFighter(idx) {
+    const m = currentGang.members[idx];
+    if (!m) return;
+
+    const isCreation = !currentGang.isEstablished;
+    const gearVanishes = shouldFighterGearVanish(m);
+
+    let bodyMsg;
+    if (isCreation) {
+        // Pendant la création du gang (non encore validée), un licenciement est
+        // annulé sans frais : le coût total du combattant (base + armes +
+        // équipements, déjà inclus dans totalCost) est intégralement remboursé,
+        // et son matériel disparaît sans passer par la réserve (le stash
+        // n'entre en jeu qu'après validation du gang).
+        bodyMsg = `Voulez-vous vraiment licencier <strong>${m.customName}</strong> (${m.charName}) ?<br><br>
+        <small style="color:#aaa; font-size:13px;">La création du gang n'est pas encore validée : son coût total (<strong>${m.totalCost || 0} cr</strong>, armes et équipements compris) sera intégralement remboursé à la trésorerie du gang. Son matériel ne rejoint pas la réserve (Stash) : il disparaît avec lui/elle. Un éventuel familier rattaché rejoint en revanche le stash, récupérable par un autre guerrier.</small>`;
+    } else {
+        bodyMsg = `Voulez-vous vraiment licencier <strong>${m.customName}</strong> (${m.charName}) ?<br><br>
+        <small style="color:#aaa; font-size:13px;">${gearVanishes
+            ? `Mercenaire, familier, bête ou brute : son équipement et ses armes disparaissent avec lui/elle.`
+            : `Ses armes et équipements rejoindront automatiquement la réserve du gang (Stash).`}</small><br>
+        <small style="color:#e74c3c; font-size:12px;">Son coût (${m.totalCost||0} cr) n'est pas remboursé : il/elle quitte simplement le gang.</small>`;
+    }
 
     showConfirmModal(
-        "Vendre un objet de la réserve",
-        `Vendre 1x <strong>"${itemName}"</strong> pour <strong>+${sellPrice} crédits</strong> ?`,
-        "Vendre",
+        "Licencier le combattant",
+        bodyMsg,
+        "Licencier",
         () => {
-            let itemIdx = currentGang.stash.findIndex(item => (typeof item === 'string' ? item : item.name) === itemName);
-            if (itemIdx === -1) return;
-
-            currentGang.stash.splice(itemIdx, 1);
-            currentGang.credits = (currentGang.credits || 0) + sellPrice;
-
-            safeSave();
-            openStashModal();
-            showToast(`1x ${itemName} vendu pour +${sellPrice} cr !`, "success");
-
-            if (typeof appState !== 'undefined' && appState.view === 'post-cycle') {
-                renderPostCycleView(document.getElementById('main-content'));
-            }
+            performRemoveFighter(idx);
         }
     );
 }
 
-// ==========================================
-// GESTION DES TERRITOIRES
-// ==========================================
-function openTerritoriesModal() {
-    if (!currentGang) return;
-    if (!currentGang.territories) currentGang.territories = [];
+function performRemoveFighter(idx) {
+    const m = currentGang.members[idx];
+    if (!m) return;
 
-    let dbTerritories = (typeof db !== 'undefined' && db.territories) ? db.territories : [];
+    const isCreation = !currentGang.isEstablished;
+    let toastMsg;
 
-    let html = `
-        <div style="max-height:60vh; overflow-y:auto;">
-            <h4>Territoires Contrôlés (${currentGang.territories.length})</h4>
-            <hr style="margin:8px 0; border-color:#333;">
-    `;
+    if (isCreation) {
+        // Coût de base + armes + équipements (hors familiers, dont le coût
+        // n'est plus jamais inclus dans totalCost depuis la correction de
+        // calculateFighterCost — voir costPrepaid) : remboursé intégralement,
+        // sans passer par le stash.
+        let refund = m.totalCost || 0;
+        currentGang.credits = (currentGang.credits || 0) + refund;
 
-    if (currentGang.territories.length === 0) {
-        html += `<p style="color:#888;">Aucun territoire contrôlé.</p>`;
-    } else {
-        html += `<div style="display:flex; flex-direction:column; gap:8px; margin-bottom:15px;">`;
-        currentGang.territories.forEach((tName, idx) => {
-            let tData = getTerritoryDef(tName);
-            let descText = tData ? tData.desc : 'Revenu : +15 cr';
-            html += `
-                <div style="background:#111; border:1px solid var(--accent-purple); padding:8px; border-radius:5px; display:flex; justify-content:space-between; align-items:center;">
-                    <div>
-                        <strong style="color:var(--accent-cyan);">${tName}</strong><br>
-                        <small style="color:#bbb;">${descText}</small>
-                    </div>
-                    <button class="btn btn-danger" style="padding:2px 8px; font-size:11px;" onclick="removeGangTerritoryFromModal(${idx})">Perdre</button>
-                </div>
-            `;
-        });
-        html += `</div>`;
-    }
-
-    html += `
-            <h4>Acquérir un nouveau Territoire</h4>
-            <hr style="margin:8px 0; border-color:#333;">
-            <div style="display:grid; grid-template-columns:1fr; gap:8px; margin-bottom:12px;">
-    `;
-
-    dbTerritories.forEach(t => {
-        let count = currentGang.territories.filter(x => x === t.name || x === t.id).length;
-        let cleanName = escapeForJsStr(t.name);
-        html += `
-            <div style="border:1px solid #444; padding:8px; border-radius:5px; background:#1a1a1a;">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <div>
-                        <strong style="color:#fff;">${t.name}</strong>
-                        ${count > 0 ? `<span style="color:#2ecc71; font-size:11px; margin-left:8px;">(Possédé x${count})</span>` : ''}
-                    </div>
-                    <button class="btn btn-cyan" style="padding:2px 8px; font-size:11px;" onclick="addTerritoryToGang('${cleanName}')">+ Prendre</button>
-                </div>
-                <small style="color:#aaa;">${t.desc}</small>
-            </div>
-        `;
-    });
-
-    html += `
-            </div>
-            <button class="btn" onclick="openAddCustomTerritoryPrompt()">+ Territoire Personnalisé</button>
-        </div>
-        <br>
-        <button class="btn" onclick="closeModal()">Fermer</button>
-    `;
-
-    if (typeof openModal === 'function') openModal("🚩 Gestion des Territoires", html);
-}
-
-function addTerritoryToGang(name) {
-    if (!currentGang) return;
-    if (!currentGang.territories) currentGang.territories = [];
-    currentGang.territories.push(name);
-    safeSave();
-    openTerritoriesModal();
-}
-
-function removeGangTerritoryFromModal(index) {
-    if (!currentGang || !currentGang.territories) return;
-    currentGang.territories.splice(index, 1);
-    safeSave();
-    openTerritoriesModal();
-}
-
-function openAddCustomTerritoryPrompt() {
-    let name = prompt("Nom du territoire personnalisé :");
-    if (name) {
-        addTerritoryToGang(name);
-    }
-}
-
-// Bonus de crédits basé sur la réputation du gang (10x sa valeur effective,
-// territoires inclus). Une seule récolte par cycle, comme la collecte des
-// territoires : verrouillé tant que le Post-Cycle n'a pas été validé.
-function actionReputationBonus() {
-    if (!currentGang) return;
-    if (postCycleSession.reputationBonusUsed) {
-        return showToast("Le bonus de réputation a déjà été récolté ce cycle.", "error");
-    }
-
-    let rep = (typeof calculateGangReputation === 'function') ? calculateGangReputation(currentGang) : (currentGang.reputation || 1);
-    let bonus = rep * 10;
-
-    currentGang.credits = (currentGang.credits || 0) + bonus;
-    postCycleSession.reputationBonusUsed = true;
-    safeSave();
-
-    showToast(`Réputation du gang (${rep}) x10 : +${bonus} crédits ajoutés aux caisses du gang !`, "success");
-    renderPostCycleView(document.getElementById('main-content'));
-}
-
-function collectAllTerritoryIncome() {
-    if (!currentGang || !currentGang.territories) return;
-    if (!postCycleSession.territoryUsed) postCycleSession.territoryUsed = {};
-
-    let totalIncome = 0;
-    let collectedCount = 0;
-
-    currentGang.territories.forEach((terId, idx) => {
-        if (postCycleSession.territoryUsed[idx]) return;
-
-        let tDef = getTerritoryDef(terId);
-        if (tDef && tDef.income) {
-            totalIncome += tDef.income;
-            postCycleSession.territoryUsed[idx] = 'credits';
-            collectedCount++;
-        }
-    });
-
-    if (collectedCount > 0) {
-        currentGang.credits += totalIncome;
-        showToast(`Récolte effectuée (${collectedCount} territoire(s)) : +${totalIncome} crédits ajoutés aux caisses du gang !`, "success");
-        safeSave();
-        renderPostCycleView(document.getElementById('main-content'));
-    } else {
-        showToast("Aucun territoire disponible pour la récolte (tous déjà exploités ce cycle).", "error");
-    }
-}
-
-function addEquipmentToStash(itemName, defaultCost = 15, count = 1) {
-    if (!currentGang) return;
-    if (!currentGang.stash) currentGang.stash = [];
-
-    let equipDef = (typeof db !== 'undefined' && db.equipment) 
-        ? db.equipment.find(e => e.name.toLowerCase().includes(itemName.toLowerCase()) || itemName.toLowerCase().includes(e.name.toLowerCase())) 
-        : null;
-
-    let finalName = equipDef ? equipDef.name : itemName;
-    let finalCost = equipDef ? (equipDef.cost_credits || equipDef.cost || equipDef.price || defaultCost) : defaultCost;
-
-    for (let i = 0; i < count; i++) {
-        currentGang.stash.push({
-            name: finalName,
-            type: "Équipement",
-            cost: finalCost
-        });
-    }
-}
-
-function claimTerritoryOption(terId, idx) {
-    if (!currentGang) return;
-    if (!postCycleSession.territoryUsed) postCycleSession.territoryUsed = {};
-
-    if (postCycleSession.territoryUsed[idx]) {
-        return showToast("Ce territoire a déjà été exploité pendant ce cycle.", "error");
-    }
-
-    let tDef = getTerritoryDef(terId);
-    let terKey = (tDef ? (tDef.id || tDef.name) : terId).toLowerCase();
-    let optType = (tDef && tDef.optionType) ? tDef.optionType.toLowerCase() : '';
-
-    if (optType === 'free_respirator' || optType === 'add_respirator' || terKey.includes('mine') || terKey.includes('respirat')) {
-        addEquipmentToStash('Respirateur', 15, 2);
-        postCycleSession.territoryUsed[idx] = 'option';
-        safeSave();
-        showToast("2 Respirateurs ont été ajoutés à la réserve du gang !", "success");
-        renderPostCycleView(document.getElementById('main-content'));
-        return;
-    }
-
-    if (optType === 'free_hazmat' || optType === 'add_hazmat' || optType === 'free_promethium' || terKey.includes('promethium') || terKey.includes('hazmat')) {
-        addEquipmentToStash('Hazard suit', 15, 3);
-        postCycleSession.territoryUsed[idx] = 'option';
-        safeSave();
-        showToast("3 Hazard suits ont été ajoutées à la réserve du gang !", "success");
-        renderPostCycleView(document.getElementById('main-content'));
-        return;
-    }
-
-    const mercDiscountMap = {
-        'discount_doc': { charId: 'merc_rogue_doc', discount: 30 },
-        'discount_ammojack': { charId: 'merc_ammo_jack', discount: 30 },
-        'discount_slopper': { charId: 'merc_slopper', discount: 30 },
-        'discount_watcher': { charId: 'merc_hive_watcher', discount: 30 },
-        'discount_runner': { charId: 'merc_dome_runner', discount: 30 }
-    };
-
-    if (optType === 'discount_ganger') {
-        let gangGangers = (typeof db !== 'undefined' && db.characters) ? db.characters.filter(c => 
-            !c.id.startsWith('merc_') && 
-            (c.type || []).some(t => t.toLowerCase() === 'ganger')
-        ) : [];
-
-        if (gangGangers.length === 0) {
-            return showToast("Aucun profil de Ganger trouvé dans ce gang.", "error");
-        }
-
-        if (gangGangers.length === 1) {
-            executeDiscountRecruitment(gangGangers[0], 25, idx);
-        } else {
-            let html = `<h3>Recruter un Ganger (Ristourne Settlement -25c)</h3><br>`;
-            gangGangers.forEach(g => {
-                let finalCost = Math.max(0, g.cost - 25);
-                html += `
-                    <div class="fighter-item">
-                        <span><strong>${g.name}</strong> — Coût réduit : ${finalCost}c <small style="text-decoration:line-through; color:#888;">(${g.cost}c)</small></span>
-                        <button class="btn btn-cyan" onclick="executeDiscountRecruitmentById('${g.id}', 25, ${idx})">Recruter</button>
-                    </div>
-                `;
-            });
-            openModal("Choix du Ganger à recruter", html);
-        }
-    } 
-    else if (mercDiscountMap[optType]) {
-        let targetInfo = mercDiscountMap[optType];
-        let charDef = (typeof db !== 'undefined' && db.characters) ? db.characters.find(c => c.id === targetInfo.charId) : null;
-        if (!charDef) return showToast("Profil introuvable.", "error");
-
-        executeDiscountRecruitment(charDef, targetInfo.discount, idx);
-    } else {
-        showToast("Aucune option particulière configurée pour ce territoire.", "error");
-    }
-}
-
-function executeDiscountRecruitmentById(charId, discount, territoryIdx) {
-    closeModal();
-    let charDef = db.characters.find(c => c.id === charId);
-    if (charDef) executeDiscountRecruitment(charDef, discount, territoryIdx);
-}
-
-function executeDiscountRecruitment(charDef, discount, territoryIdx) {
-    let finalCost = Math.max(0, charDef.cost - discount);
-
-    if (currentGang.credits < finalCost) {
-        return showToast(`Crédits insuffisants. Requis : ${finalCost}c | Disponible : ${currentGang.credits}c`, "error");
-    }
-
-    let defaultWeapons = [];
-    if (charDef.default_weapons) {
-        charDef.default_weapons.forEach(wId => {
-            let wObj = db.weapons.find(w => w.id === wId);
-            if (wObj) defaultWeapons.push(JSON.parse(JSON.stringify(wObj)));
-        });
-    }
-
-    let defaultEquip = [];
-    if (charDef.default_equipment) {
-        charDef.default_equipment.forEach(eId => {
-            let eObj = db.equipment.find(e => e.id === eId);
-            if (eObj) defaultEquip.push(JSON.parse(JSON.stringify(eObj)));
-        });
-    }
-
-    let defaultSkills = [];
-    if (charDef.starting_skill && charDef.starting_skill.trim() !== "" && !charDef.starting_skill.includes("choix") && !charDef.starting_skill.includes("selon")) {
-        const norm = str => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-        let skillNames = charDef.starting_skill.split(/\s+et\s+|,\s*|\/\s*/i);
-
-        skillNames.forEach(rawName => {
-            let cleanRaw = rawName.trim();
-            if (!cleanRaw) return;
-
-            let normRaw = norm(cleanRaw);
-            let foundSkill = null;
-
-            if (typeof db !== 'undefined' && db.skills) {
-                for (let cat in db.skills) {
-                    let match = db.skills[cat].find(s => {
-                        let normS = norm(s.name);
-                        if (normS === normRaw) return true;
-                        if (normRaw.startsWith("leash") && normS.startsWith("leash")) return true;
-                        return false;
-                    });
-                    if (match) {
-                        foundSkill = JSON.parse(JSON.stringify(match));
-                        if (normRaw.startsWith("leash")) {
-                            foundSkill.name = cleanRaw.charAt(0).toUpperCase() + cleanRaw.slice(1);
-                        }
-                        break;
-                    }
-                }
-            }
-
-            if (foundSkill) {
-                defaultSkills.push(foundSkill);
-            } else {
-                defaultSkills.push({
-                    id: "sk_start_" + generateId(),
-                    name: cleanRaw.charAt(0).toUpperCase() + cleanRaw.slice(1),
-                    desc: "Compétence de départ"
+        // Un familier attaché à ce combattant n'est ni remboursé en crédits,
+        // ni perdu : comme en campagne (licenciement/mort), il rejoint le
+        // stash sous forme d'objet "Familier" que n'importe quel autre
+        // guerrier pourra reprendre gratuitement (adoptFamiliarFromStash).
+        let hadFamiliar = false;
+        (m.equipment || []).forEach(e => {
+            if (e && e.familiarMemberId) {
+                hadFamiliar = true;
+                if (!currentGang.stash) currentGang.stash = [];
+                currentGang.stash.push({
+                    name: e.name,
+                    type: 'Familier',
+                    cost: e.cost_credits || e.cost || 0,
+                    familiarCharId: e.familiarCharId
                 });
+                currentGang.members = currentGang.members.filter(fm => fm.id !== e.familiarMemberId);
             }
         });
-    }
 
-    let isBruteChar = (charDef.type && Array.isArray(charDef.type) && charDef.type.some(t => String(t).toLowerCase() === 'brute')) ||
-                      (charDef.starting_skill && charDef.starting_skill.toLowerCase().includes("juggernaut"));
-    if (isBruteChar) {
-        let juggSkill = (typeof db !== 'undefined' && db.skills && db.skills.generique)
-            ? db.skills.generique.find(s => s.id === 'sk_juggernaut' || s.name.toLowerCase() === 'juggernaut')
-            : null;
-        if (!juggSkill) {
-            juggSkill = {
-                id: "sk_juggernaut",
-                name: "Juggernaut",
-                desc: "Si touché au tir, suppressed uniquement si PV perdu ou effet du dé de blessure.",
-                specific_to: "brute"
-            };
-        }
-        if (!defaultSkills.some(s => (s.id === 'sk_juggernaut' || ((typeof s === 'object' ? s.name : s) && (typeof s === 'object' ? s.name : s).toLowerCase() === 'juggernaut')))) {
-            defaultSkills.push(JSON.parse(JSON.stringify(juggSkill)));
-        }
-    }
-
-    let isLeaderChar = (charDef.type && Array.isArray(charDef.type) && charDef.type.some(t => String(t).toLowerCase() === 'leader')) ||
-                       (charDef.id === "char_reine_de_gang");
-    if (isLeaderChar) {
-        let inspSkill = (typeof db !== 'undefined' && db.skills && db.skills.generique)
-            ? db.skills.generique.find(s => s.id === 'sk_inspirant' || s.name.toLowerCase() === 'inspirant' || s.name.toLowerCase() === 'inspiring')
-            : null;
-        let inspirantObj = inspSkill ? JSON.parse(JSON.stringify(inspSkill)) : {
-            id: "sk_inspirant",
-            name: "Inspirant",
-            desc: "Peut faire l'action d'activation de groupe en action gratuite."
-        };
-        let chefSkill = (typeof db !== 'undefined' && db.skills && db.skills.generique)
-            ? db.skills.generique.find(s => s.id === 'sk_chef' || s.name.toLowerCase() === 'chef')
-            : null;
-        let chefObj = chefSkill ? JSON.parse(JSON.stringify(chefSkill)) : {
-            id: "sk_chef",
-            name: "Chef",
-            desc: "Tous les alliés dans les 12\" et en ligne de vue peuvent utiliser le Cl du leader pour leurs tests de nerf."
-        };
-        if (!defaultSkills.some(s => s.id === 'sk_inspirant' || ((typeof s === 'object' ? s.name : s) && (typeof s === 'object' ? s.name : s).toLowerCase() === 'inspirant'))) {
-            defaultSkills.push(JSON.parse(JSON.stringify(inspirantObj)));
-        }
-        if (!defaultSkills.some(s => s.id === 'sk_chef' || ((typeof s === 'object' ? s.name : s) && (typeof s === 'object' ? s.name : s).toLowerCase() === 'chef'))) {
-            defaultSkills.push(JSON.parse(JSON.stringify(chefObj)));
-        }
-    }
-
-    let isChampionChar = (charDef.type && Array.isArray(charDef.type) && charDef.type.some(t => String(t).toLowerCase() === 'champion')) ||
-                         (charDef.id === "char_matriarche" || charDef.id === "char_death_maiden");
-    if (isChampionChar) {
-        let inspSkill = (typeof db !== 'undefined' && db.skills && db.skills.generique)
-            ? db.skills.generique.find(s => s.id === 'sk_inspirant' || s.name.toLowerCase() === 'inspirant' || s.name.toLowerCase() === 'inspiring')
-            : null;
-        let inspirantObj = inspSkill ? JSON.parse(JSON.stringify(inspSkill)) : {
-            id: "sk_inspirant",
-            name: "Inspirant",
-            desc: "Peut faire l'action d'activation de groupe en action gratuite."
-        };
-        let sousChefSkill = (typeof db !== 'undefined' && db.skills && db.skills.generique)
-            ? db.skills.generique.find(s => s.id === 'sk_sous_chef' || s.name.toLowerCase() === 'sous-chef' || s.name.toLowerCase() === 'sous chef')
-            : null;
-        let sousChefObj = sousChefSkill ? JSON.parse(JSON.stringify(sousChefSkill)) : {
-            id: "sk_sous_chef",
-            name: "Sous-chef",
-            desc: "Tous les alliés dans les 6\" et en ligne de vue peuvent utiliser le Cl du leader pour leurs tests de nerf."
-        };
-        if (!defaultSkills.some(s => s.id === 'sk_inspirant' || ((typeof s === 'object' ? s.name : s) && (typeof s === 'object' ? s.name : s).toLowerCase() === 'inspirant'))) {
-            defaultSkills.push(JSON.parse(JSON.stringify(inspirantObj)));
-        }
-        if (!defaultSkills.some(s => s.id === 'sk_sous_chef' || ((typeof s === 'object' ? s.name : s) && (typeof s === 'object' ? s.name : s).toLowerCase() === 'sous-chef'))) {
-            defaultSkills.push(JSON.parse(JSON.stringify(sousChefObj)));
-        }
-    }
-
-    let newFighter = {
-        id: generateId(),
-        charId: charDef.id,
-        charName: charDef.name,
-        customName: charDef.name,
-        type: charDef.type,
-        stats: JSON.parse(JSON.stringify(charDef.stats)),
-        weapons: defaultWeapons,
-        equipment: defaultEquip,
-        skills: defaultSkills,
-        totalCost: charDef.cost
-    };
-
-    currentGang.credits -= finalCost;
-    currentGang.members.push(newFighter);
-    if (typeof ensureInnateFighterSkills === 'function') {
-        ensureInnateFighterSkills(currentGang);
-    }
-
-    if (!postCycleSession.territoryUsed) postCycleSession.territoryUsed = {};
-    if (territoryIdx !== undefined && territoryIdx !== null) {
-        postCycleSession.territoryUsed[territoryIdx] = 'option';
-    }
-
-    safeSave();
-    if (typeof handleRecruitTactics === 'function') {
-        handleRecruitTactics(newFighter, true);
+        toastMsg = `${m.customName} a été licencié(e). ${refund} cr remboursé(s) à la trésorerie du gang.${hadFamiliar ? " Son familier rejoint la réserve du gang (récupérable par un autre guerrier)." : ""}`;
     } else {
-        showToast(`${charDef.name} a été recruté pour ${finalCost}c (réduction de ${discount}c appliquée) !`, "success");
+        transferFighterGearToStash(m);
+        toastMsg = `${m.customName} a été licencié(e). ${shouldFighterGearVanish(m) ? "Son équipement a disparu avec lui/elle." : "Ses armes et équipements ont rejoint la réserve du gang."}`;
     }
-    renderPostCycleView(document.getElementById('main-content'));
+
+    currentGang.members.splice(idx, 1);
+    calculateGangRating(currentGang);
+    saveGangs();
+    renderGangManage(document.getElementById('main-content'));
+    showToast(toastMsg, isCreation ? "success" : undefined);
+    if (typeof ensureGangHasLeader === 'function') ensureGangHasLeader();
 }
 
-function showConditionDetails(condName) {
-    let desc = "Description non renseignée.";
-    if (typeof db !== 'undefined' && db.conditions) {
-        let key = Object.keys(db.conditions).find(k => k.toLowerCase() === condName.toLowerCase() || condName.toLowerCase().startsWith(k.toLowerCase()));
-        if (key) desc = db.conditions[key];
+// ==========================================
+// MODALE & UTILS EXPORT
+// ==========================================
+function openModal(title, content, isLandscape = false) {
+    const modalTitle = document.getElementById('modal-title');
+    const modalBody = document.getElementById('modal-body');
+    const modalOverlay = document.getElementById('modal-overlay');
+    const modalContent = document.querySelector('.modal-content');
+    const modalFooter = document.getElementById('modal-footer');
+
+    if (modalTitle) modalTitle.innerText = title;
+    if (modalBody) modalBody.innerHTML = content;
+    
+    if (modalContent) {
+        if (isLandscape) {
+            modalContent.classList.add('modal-landscape');
+        } else {
+            modalContent.classList.remove('modal-landscape');
+        }
     }
-    openModal(`Condition : ${condName}`, `<p style="padding:10px; font-size:14px; line-height:1.5;">${desc}</p>`);
+
+    if (modalFooter && modalBody) {
+        // Détecte si le contenu injecté possède déjà son propre bouton de fermeture / annulation (appelant closeModal)
+        // afin d'éviter tout doublon (un seul bouton en bas suffit)
+        const hasExistingCloseBtn = modalBody.querySelector('button[onclick*="closeModal"]') !== null;
+        modalFooter.style.display = hasExistingCloseBtn ? 'none' : 'flex';
+    }
+
+    if (modalOverlay) {
+        modalOverlay.classList.remove('hidden');
+        modalOverlay.style.display = 'flex';
+    }
 }
 
-function openPdfModal(title, url) {
-    let pdfUrl = `${url}#navpanes=0&toolbar=0&view=FitH`;
-    let html = `
-        <div style="height:85vh; width:100%;">
-            <iframe src="${pdfUrl}" style="width:100%; height:100%; border:none;"></iframe>
-        </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
-            <button class="btn btn-cyan" onclick="window.open('${url}', '_blank')">↗️ Ouvrir en grand (Onglet)</button>
-            <button class="btn" onclick="closeModal()">Fermer</button>
+function closeModal() {
+    const modalOverlay = document.getElementById('modal-overlay');
+    const modalContent = document.querySelector('.modal-content');
+    if (modalOverlay) {
+        modalOverlay.classList.add('hidden');
+        modalOverlay.style.display = 'none';
+    }
+    if (modalContent) modalContent.classList.remove('modal-landscape');
+
+    if (window._onConfirmCancel) {
+        const cancelFn = window._onConfirmCancel;
+        window._onConfirmCancel = null;
+        cancelFn();
+    }
+    window._onConfirmAction = null;
+
+    if (appState.view === 'fighter-edit') {
+        renderFighterEdit(document.getElementById('main-content'));
+    }
+}
+
+function triggerConfirmAction() {
+    const fn = window._onConfirmAction;
+    window._onConfirmAction = null;
+    window._onConfirmCancel = null;
+
+    closeModal();
+
+    if (typeof fn === 'function') {
+        fn();
+    }
+}
+
+// Notifications toast non-bloquantes (idéal pour iframe sandboxed)
+function showToast(message, type = 'info') {
+    let container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    toast.className = `toast ${type === 'error' ? 'toast-error' : (type === 'success' ? 'toast-success' : '')}`;
+    toast.innerHTML = `<span>${message}</span><span style="cursor:pointer; margin-left:10px; font-weight:bold; opacity:0.8;" onclick="this.parentElement.remove()">✕</span>`;
+    container.appendChild(toast);
+    setTimeout(() => {
+        if (toast.parentElement) toast.remove();
+    }, 3800);
+}
+
+// Filet de sécurité : window.alert() et window.confirm() sont bloqués dans l'iframe
+// d'hébergement. Tout le code appelle désormais showToast()/showConfirmModal()
+// directement ; ce remplacement reste en place pour intercepter un éventuel alert()
+// oublié plutôt que de bloquer silencieusement l'interface.
+window.alert = function(msg) {
+    showToast(msg, 'info');
+};
+
+// Modale de confirmation personnalisée pour remplacer confirm() bloqué en iframe
+function showConfirmModal(title, message, confirmText, onConfirm, cancelText = "Annuler", onCancel = null) {
+    window._onConfirmAction = onConfirm;
+    window._onConfirmCancel = onCancel;
+
+    const html = `
+        <div style="padding: 10px 0;">
+            <div style="font-size: 15px; margin-bottom: 22px; line-height: 1.5; color: #eee;">${message}</div>
+            <div style="display: flex; justify-content: flex-end; gap: 10px; flex-wrap:wrap;">
+                <button class="btn" style="padding: 8px 16px; margin:0;" onclick="closeModal();">${cancelText}</button>
+                <button class="btn btn-cyan" style="padding: 8px 20px; font-weight: bold; margin:0;" onclick="triggerConfirmAction();">${confirmText}</button>
+            </div>
         </div>
     `;
     openModal(title, html);
 }
 
-function saveMatchToHistory() {
-    if (!currentGang) return;
 
-    let opponentName = document.getElementById('hist-opponent-name')?.value.trim() || 'Inconnu';
-    let opponentGang = document.getElementById('hist-opponent-gang')?.value.trim() || 'Inconnu';
-    let result = document.getElementById('hist-result')?.value || 'Égalité';
-
-    let credPrimary = parseInt(document.getElementById('hist-cred-primary')?.value) || 0;
-    let credSecondary = parseInt(document.getElementById('hist-cred-secondary')?.value) || 0;
-    let totalCredits = credPrimary + credSecondary;
-
-    let repChange = parseInt(document.getElementById('hist-rep')?.value) || 0;
-
-    let gainedTer = document.getElementById('hist-ter-gained')?.value || '';
-    let lostTerIdx = document.getElementById('hist-ter-lost')?.value;
-
-    let territorySummary = 'Aucun';
-    if (!currentGang.territories) currentGang.territories = [];
-
-    if (gainedTer !== '') {
-        currentGang.territories.push(gainedTer);
-        territorySummary = `+ ${gainedTer}`;
-    } else if (lostTerIdx !== undefined && lostTerIdx !== '') {
-        let idx = parseInt(lostTerIdx);
-        if (!isNaN(idx) && idx >= 0 && idx < currentGang.territories.length) {
-            let removed = currentGang.territories.splice(idx, 1)[0];
-            territorySummary = `- ${removed}`;
-        }
-    }
-
-    currentGang.credits = (currentGang.credits || 0) + totalCredits;
-    if (repChange !== 0) {
-        currentGang.reputation = Math.max(1, (currentGang.reputation || 1) + repChange);
-    }
-
-    if (!currentGang.history) currentGang.history = [];
-    currentGang.history.push({
-        id: generateId(),
-        date: new Date().toLocaleDateString('fr-FR'),
-        opponentName: opponentName,
-        opponentGang: opponentGang,
-        result: result,
-        primaryCredits: credPrimary,
-        secondaryCredits: credSecondary,
-        totalCredits: totalCredits,
-        repChange: repChange,
-        territory: territorySummary
-    });
-
-    safeSave();
-    updateGameTopBar();
-    renderPostBattleView(document.getElementById('main-content'));
+function exportGang(name) {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(savedGangs[name], null, 2));
+    const dlAnchorElem = document.createElement('a');
+    dlAnchorElem.setAttribute("href", dataStr);
+    dlAnchorElem.setAttribute("download", `Gang_${name.replace(/\s+/g, '_')}.json`);
+    dlAnchorElem.click();
 }
 
-function openMatchHistoryModal() {
-    if (!currentGang) return;
-    let history = currentGang.history || [];
+function importGang() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json';
+    input.onchange = e => {
+        const file = e.target.files[0];
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const gang = JSON.parse(event.target.result);
 
-    if (history.length === 0) {
-        return openModal("📜 Historique des Parties", "<p style='color:#888;'>Aucune partie enregistrée pour ce gang.</p>");
+                if (!gang || typeof gang !== 'object' || !gang.name || !Array.isArray(gang.members)) {
+                    showToast("Fichier JSON invalide : structure de gang non reconnue.", "error");
+                    return;
+                }
+
+                // Ce programme ne gère que des listes Delaque : on rejette tout fichier
+                // explicitement tagué pour une autre faction (Escher, Genestealer,
+                // Cawdor...). Un fichier SANS tag (export fait avant l'ajout de cette
+                // protection) est accepté et tagué Delaque, par compatibilité.
+                if (gang.faction && gang.faction !== APP_GANG_FACTION) {
+                    showToast(`Ce fichier est une liste "${gang.faction}", pas une liste Delaque. Ce programme n'importe que des listes Delaque.`, "error");
+                    return;
+                }
+                gang.faction = APP_GANG_FACTION;
+
+                savedGangs[gang.name] = gang;
+                saveGangs();
+                showToast("Gang Delaque importé avec succès !", "success");
+                navigate('gang-select');
+            } catch(err) { showToast("Fichier JSON invalide.", "error"); }
+        };
+        reader.readAsText(file);
+    };
+    input.click();
+}
+
+function deleteGang(name) {
+    showConfirmModal(
+        "Supprimer définitivement le gang",
+        `Êtes-vous sûr de vouloir supprimer définitivement le gang <strong>${name}</strong> ?<br><br><small style="color:#e74c3c;">Cette action effacera toutes les fiches de combattants et l'historique associé.</small>`,
+        "Supprimer",
+        () => {
+            delete savedGangs[name];
+            saveGangs();
+            renderGangSelect(document.getElementById('main-content'));
+            showToast(`Le gang ${name} a été supprimé.`, "info");
+        }
+    );
+}
+
+// ==========================================
+// GESTION DES CARTES TACTIQUES (AUTOMATIQUE & CONSULTATION)
+// ==========================================
+function ensureNoDuplicateTactics(gang) {
+    if (!gang || !gang.tactics) return;
+    let seen = new Set();
+    let clean = [];
+    let allPool = (typeof db !== 'undefined' && db.tactics) ? db.tactics : [];
+    gang.tactics.forEach(t => {
+        let id = typeof t === 'string' ? t : (t && t.id ? t.id : null);
+        if (id && !seen.has(id)) {
+            seen.add(id);
+            let full = allPool.find(x => x.id === id);
+            if (full) {
+                clean.push(JSON.parse(JSON.stringify(full)));
+            } else if (typeof t === 'object') {
+                clean.push(t);
+            } else {
+                clean.push({ id, name: id, timing: '', effect: '' });
+            }
+        }
+    });
+    gang.tactics = clean;
+}
+
+function getFighterTacticsCardCount(fighter) {
+    if (!fighter) return 0;
+    let types = (fighter.type || []).map(t => String(t || '').trim().toLowerCase());
+    if (types.includes("leader")) return 2;
+    if (types.includes("champion")) return 1;
+
+    if (fighter.charId && typeof db !== 'undefined' && db.characters) {
+        let charDef = db.characters.find(c => c.id === fighter.charId);
+        if (charDef) {
+            let charTypes = (charDef.type || []).map(t => String(t || '').trim().toLowerCase());
+            if (charTypes.includes("leader")) return 2;
+            if (charTypes.includes("champion")) return 1;
+            if (charDef.tactics_cards) return charDef.tactics_cards;
+        }
+    }
+    return 0;
+}
+
+function drawRandomTacticsForGang(gang, count) {
+    if (!gang || count <= 0) return [];
+    if (!gang.tactics) gang.tactics = [];
+    ensureNoDuplicateTactics(gang);
+
+    let ownedIds = gang.tactics.map(t => (typeof t === 'string' ? t : t.id));
+    let allPool = (typeof db !== 'undefined' && db.tactics) ? db.tactics : [];
+    let availablePool = allPool.filter(t => !ownedIds.includes(t.id));
+
+    let drawn = [];
+    for (let i = 0; i < count && availablePool.length > 0; i++) {
+        let randIdx = Math.floor(Math.random() * availablePool.length);
+        let picked = availablePool.splice(randIdx, 1)[0];
+        let cardCopy = JSON.parse(JSON.stringify(picked));
+        gang.tactics.push(cardCopy);
+        drawn.push(cardCopy);
+    }
+    return drawn;
+}
+
+function handleRecruitTactics(fighter, isPostCycle) {
+    if (!currentGang || !fighter) return;
+    if (!currentGang.tactics) currentGang.tactics = [];
+    ensureNoDuplicateTactics(currentGang);
+
+    let count = getFighterTacticsCardCount(fighter);
+    let allPool = (typeof db !== 'undefined' && db.tactics) ? db.tactics : [];
+    let ownedIdsBefore = currentGang.tactics.map(t => (typeof t === 'string' ? t : t.id));
+    let availablePool = allPool.filter(t => !ownedIdsBefore.includes(t.id));
+
+    let drawnCards = [];
+    if (count > 0) {
+        drawnCards = drawRandomTacticsForGang(currentGang, count);
+        saveGangs();
     }
 
-    let html = `
-        <div style="max-height:60vh; overflow-y:auto; padding-right:5px;">
-            <table style="width:100%; border-collapse:collapse; text-align:left; font-size:12px;">
-                <thead>
-                    <tr style="border-bottom:2px solid var(--accent-purple, #9b59b6); background:#111;">
-                        <th style="padding:6px;">Date</th>
-                        <th style="padding:6px;">Adversaire</th>
-                        <th style="padding:6px; text-align:center;">Résultat</th>
-                        <th style="padding:6px; text-align:center;">Crédits</th>
-                        <th style="padding:6px; text-align:center;">Rép.</th>
-                        <th style="padding:6px;">Territoire</th>
-                    </tr>
-                </thead>
-                <tbody>
-    `;
+    let isLeader = count === 2;
+    let isChampion = count === 1;
+    let fName = fighter.customName || fighter.charName || 'Combattant';
+    let fRole = fighter.charName || (isLeader ? 'Leader' : (isChampion ? 'Champion' : 'Guerrier'));
 
-    history.slice().reverse().forEach(item => {
-        let resColor = item.result === 'Victoire' ? '#2ecc71' : (item.result === 'Défaite' ? '#e74c3c' : '#f1c40f');
-        let repText = (item.repChange > 0) ? `+${item.repChange}` : `${item.repChange || 0}`;
+    let modalTitle = "";
+    let html = "";
 
-        html += `
-            <tr style="border-bottom:1px solid #222;">
-                <td style="padding:6px;">${item.date}</td>
-                <td style="padding:6px;"><strong>${item.opponentName || 'Inconnu'}</strong><br><small style="color:#aaa;">${item.opponentGang || '-'}</small></td>
-                <td style="padding:6px; text-align:center; color:${resColor}; font-weight:bold;">${item.result || 'Égalité'}</td>
-                <td style="padding:6px; text-align:center; color:var(--accent-cyan, #00d2d3);">+${item.totalCredits || 0} cr</td>
-                <td style="padding:6px; text-align:center;">${repText}</td>
-                <td style="padding:6px;"><small style="color:#ddd;">${item.territory || 'Aucun'}</small></td>
-            </tr>
+    if (drawnCards.length > 0) {
+        modalTitle = "🎴 Nouvelles Cartes Tactiques Débloquées";
+        html = `
+            <div style="padding:4px;">
+                <div style="background:#11131c; border:1px solid #282b42; border-radius:6px; padding:12px; margin-bottom:14px;">
+                    <div style="font-size:14px; color:#fff; margin-bottom:4px;">
+                        Combattant recruté : <strong style="color:var(--accent-cyan); font-size:16px;">${fName}</strong> 
+                        <span style="color:#aaa;">(${fRole})</span>
+                    </div>
+                    <div style="font-size:13px; color:var(--accent-purple); font-weight:bold;">
+                        ⭐ Rôle : ${isLeader ? 'Leader' : 'Champion'} ➔ +${drawnCards.length} carte(s) tactique(s) générée(s) aléatoirement !
+                    </div>
+                </div>
+
+                <p style="font-size:13px; color:#ccc; margin-bottom:10px;">
+                    Voici les cartes tactiques uniques tirées sans doublon qui rejoignent immédiatement le deck de votre gang :
+                </p>
+
+                <div style="max-height:48vh; overflow-y:auto; margin-bottom:14px;">
+                    ${drawnCards.map((card, idx) => `
+                        <div style="background:#111; border:1px solid #444; border-left:4px solid var(--accent-cyan); border-radius:6px; padding:10px 12px; margin-bottom:10px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                                <strong style="color:var(--accent-cyan); font-size:15px;">${card.name}</strong>
+                                <span style="font-size:11px; color:#aaa; background:#1e1e2f; padding:2px 8px; border-radius:4px;">Carte ${idx + 1}/${drawnCards.length}</span>
+                            </div>
+                            <div style="font-size:12px; color:#c084fc; margin-bottom:4px;">
+                                <strong>Timing :</strong> ${card.timing || 'N/A'}
+                            </div>
+                            <div style="font-size:12px; color:#ddd; line-height:1.4;">
+                                <strong>Effet :</strong> ${card.effect || 'N/A'}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+
+                <div style="background:#151515; border-radius:6px; padding:8px 12px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; font-size:12px; color:#aaa;">
+                    <span>Deck total du gang : <strong style="color:#fff;">${currentGang.tactics.length}</strong> / ${allPool.length} cartes</span>
+                    <span style="color:#2ecc71;">✓ Garanti sans doublon</span>
+                </div>
+
+                <button class="btn btn-cyan" style="width:100%; padding:10px; font-weight:bold;" onclick="closeModal()">
+                    Continuer
+                </button>
+            </div>
         `;
+    } else if (count > 0 && availablePool.length === 0) {
+        modalTitle = "🎴 Deck Tactique Déjà Complet";
+        html = `
+            <div style="padding:4px;">
+                <div style="background:#11131c; border:1px solid #282b42; border-radius:6px; padding:12px; margin-bottom:14px;">
+                    <div style="font-size:14px; color:#fff; margin-bottom:4px;">
+                        Combattant recruté : <strong style="color:var(--accent-cyan); font-size:16px;">${fName}</strong> 
+                        <span style="color:#aaa;">(${fRole})</span>
+                    </div>
+                    <div style="font-size:13px; color:var(--accent-purple); font-weight:bold;">
+                        ⭐ Rôle : ${isLeader ? 'Leader (+2 cartes)' : 'Champion (+1 carte)'}
+                    </div>
+                </div>
+                <div style="background:#111; border:1px solid #444; border-radius:6px; padding:12px; margin-bottom:14px; color:#ccc; font-size:13px;">
+                    <p style="margin:0; color:#f39c12; font-weight:bold; margin-bottom:6px;">⚠️ Toutes les cartes sont déjà possédées !</p>
+                    Toutes les cartes tactiques du jeu (${allPool.length} / ${allPool.length}) font déjà partie du deck de votre gang. Aucune nouvelle carte supplémentaire ne peut être tirée.
+                </div>
+                <button class="btn btn-cyan" style="width:100%; padding:10px; font-weight:bold;" onclick="closeModal()">
+                    Continuer
+                </button>
+            </div>
+        `;
+    } else {
+        // Les guerriers qui ne sont ni Leader ni Champion ne génèrent aucune
+        // carte tactique : pas besoin de fenêtre pour eux, juste un toast discret.
+        if (typeof showToast === 'function') {
+            showToast(`${fName} a rejoint le gang !`, "success");
+        }
+        return;
+    }
+
+    if (typeof openModal === 'function') {
+        openModal(modalTitle, html);
+    }
+}
+
+function openGangTacticsModal() {
+    if (!currentGang) return;
+    if (!currentGang.tactics) currentGang.tactics = [];
+    ensureNoDuplicateTactics(currentGang);
+
+    let allPool = (typeof db !== 'undefined' && db.tactics) ? db.tactics : [];
+    let ownedCards = currentGang.tactics.map(gt => {
+        let id = (typeof gt === 'string') ? gt : gt.id;
+        let full = allPool.find(t => t.id === id);
+        if (full) return full;
+        return (typeof gt === 'object') ? gt : { id, name: id, timing: '', effect: '' };
     });
 
-    html += `
-                </tbody>
-            </table>
+    let html = `
+        <div style="background:#11131c; border:1px solid #282b42; border-radius:6px; padding:10px 12px; margin-bottom:12px; font-size:13px; color:#ccc;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                <span>Cartes possédées : <strong style="color:var(--accent-cyan); font-size:15px;">${ownedCards.length}</strong> / ${allPool.length}</span>
+                <span style="font-size:11px; color:#2ecc71;">✓ Garanti sans doublon</span>
+            </div>
+            <p style="margin-top:6px; margin-bottom:0; font-size:12px; color:#888; line-height:1.4;">
+                💡 Les cartes tactiques sont acquises automatiquement lors du recrutement d'un <strong>Leader (+2 cartes)</strong> ou d'un <strong>Champion (+1 carte)</strong>, ainsi que par l'action de <strong>Développement Tactique</strong> en post-cycle. Elles ne peuvent pas être ajoutées ou retirées manuellement.
+            </p>
         </div>
-        <br>
-        <button class="btn" onclick="closeModal()">Fermer</button>
+        <div style="max-height:55vh; overflow-y:auto;">
     `;
 
-    if (typeof openModal === 'function') openModal("📜 Historique des Parties", html);
+    if (ownedCards.length === 0) {
+        html += `
+            <div style="padding:24px 16px; text-align:center; color:#aaa; background:#111; border:1px dashed #444; border-radius:6px;">
+                <p style="margin:0 0 6px 0; font-size:15px; color:#eee;">Aucune carte tactique possédée pour le moment.</p>
+                <small style="color:#777;">Recrutez un Leader ou un Champion pour générer automatiquement vos premières cartes tactiques !</small>
+            </div>
+        `;
+    } else {
+        ownedCards.forEach((t, idx) => {
+            html += `
+                <div style="border:1px solid #333; padding:10px 12px; margin-bottom:8px; border-radius:6px; background:#111; border-left:4px solid var(--accent-purple);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                        <strong style="color:var(--accent-cyan); font-size:15px;">${t.name}</strong>
+                        <span style="font-size:11px; color:#777; background:#181818; padding:2px 6px; border-radius:3px;">#${idx + 1}</span>
+                    </div>
+                    <div style="font-size:12px; color:#c084fc; margin-bottom:4px;">
+                        <strong>Timing :</strong> ${t.timing || 'N/A'}
+                    </div>
+                    <div style="font-size:12px; color:#ddd; line-height:1.4;">
+                        <strong>Effet :</strong> ${t.effect || 'N/A'}
+                    </div>
+                </div>
+            `;
+        });
+    }
+
+    html += `</div><br><button class="btn btn-cyan" style="width:100%; padding:10px; font-weight:bold;" onclick="closeModal()">Fermer</button>`;
+    openModal(`🎴 Cartes Tactiques du Gang (${ownedCards.length})`, html);
+}
+
+function toggleGangTactic() {
+    showToast("Les cartes tactiques ne peuvent pas être modifiées manuellement. Elles sont obtenues automatiquement lors du recrutement d'un Leader (+2) ou d'un Champion (+1), ou via le Développement Tactique en post-cycle.", "info");
+}
+
+// ==========================================
+// INITIALISATION AUTOMATIQUE DE L'APPLICATION
+// ==========================================
+function initApp() {
+    const container = document.getElementById('main-content');
+    if (container && (!container.innerHTML || container.innerHTML.trim() === '')) {
+        navigate('menu');
+    }
+    // Prévient l'utilisateur si des listes d'une autre faction ont été détectées et
+    // retirées de cette appli au chargement (voir quarantineForeignFactionGangs
+    // dans core-state.js). Fait ici plutôt qu'au chargement des données car
+    // showToast n'est défini que dans ce fichier, chargé après core-state.js.
+    if (typeof _quarantinedGangsCount !== 'undefined' && _quarantinedGangsCount > 0) {
+        const n = _quarantinedGangsCount;
+        showToast(`${n} liste${n > 1 ? 's' : ''} d'une autre faction que Delaque détectée${n > 1 ? 's' : ''} et retirée${n > 1 ? 's' : ''} de cette appli (conservée${n > 1 ? 's' : ''}, non affichée${n > 1 ? 's' : ''} ici).`, "info");
+        _quarantinedGangsCount = 0;
+    }
+    // Prévient l'utilisateur si d'anciennes blessures permanentes ont été corrigées
+    // rétroactivement (le malus de statistique n'était pas appliqué avant cette
+    // mise à jour, voir migrateSavedGangsIfNeeded et le fichier game-state-scenarios.js).
+    if (typeof _injuryStatFixCount !== 'undefined' && _injuryStatFixCount > 0) {
+        const n = _injuryStatFixCount;
+        showToast(`Correctif appliqué : ${n} malus de blessure${n > 1 ? 's' : ''} permanente${n > 1 ? 's' : ''} (statistique) qui n'${n > 1 ? 'étaient' : 'était'} pas actif${n > 1 ? 's' : ''} ${n > 1 ? 'ont' : 'a'} été appliqué${n > 1 ? 's' : ''} rétroactivement.`, "info");
+        _injuryStatFixCount = 0;
+    }
+}
+
+window.ensureNoDuplicateTactics = ensureNoDuplicateTactics;
+window.getFighterTacticsCardCount = getFighterTacticsCardCount;
+window.drawRandomTacticsForGang = drawRandomTacticsForGang;
+window.handleRecruitTactics = handleRecruitTactics;
+window.openGangTacticsModal = openGangTacticsModal;
+window.openRecruitModal = openRecruitModal;
+window.selectRecruitProfile = selectRecruitProfile;
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initApp);
+} else {
+    initApp();
 }
