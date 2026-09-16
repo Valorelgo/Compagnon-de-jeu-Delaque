@@ -94,7 +94,23 @@ input, select {
 }
 
 .skill-category { margin-top: 15px; border-bottom: 1px solid var(--border-color); padding-bottom: 5px; }
-.skill-checkbox-group { display: flex; align-items: center; gap: 8px; margin: 5px 0; }
+.skill-checkbox-group {
+    display: grid;
+    grid-template-columns: 20px 1fr;
+    align-items: start;
+    gap: 10px;
+    margin: 6px 0;
+}
+.skill-checkbox-group input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    margin-top: 3px;
+    flex-shrink: 0;
+}
+.skill-checkbox-group label {
+    text-align: left;
+    line-height: 1.5;
+}
 .skill-checkbox-group.disabled { opacity: 0.4; pointer-events: none; }
 
 /* Mode Combat & Ergonomie Paysage */
