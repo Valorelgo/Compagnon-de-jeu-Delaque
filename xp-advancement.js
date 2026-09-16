@@ -45,7 +45,19 @@ function getEligibleSkillTreeKeys(m, mode) {
     const norm = s => String(s || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
     let list = (mode === 'primary' ? charDef.primary_skills : charDef.secondary_skills) || [];
     let listNorm = list.map(norm);
-    return Object.keys(db.skills || {}).filter(k => listNorm.includes(norm(k)));
+    let keys = Object.keys(db.skills || {}).filter(k => listNorm.includes(norm(k)));
+
+    // Un combattant ayant le type "wyrd" (option payante Master of
+    // shadows/Phantom, ou type inné Psy-Gheist/Piscean Spektor) garde accès à
+    // Psychoteric wyrd comme catégorie primaire supplémentaire pour toutes
+    // ses avancées futures, pas seulement au recrutement.
+    if (mode === 'primary') {
+        let isWyrd = (m.type || []).some(t => String(t).toLowerCase() === 'wyrd');
+        if (isWyrd && db.skills.psychoteric_wyrd && !keys.includes('psychoteric_wyrd')) {
+            keys.push('psychoteric_wyrd');
+        }
+    }
+    return keys;
 }
 
 // Une compétence "specific_to" n'est proposée qu'au combattant/type concerné
