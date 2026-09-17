@@ -550,7 +550,7 @@ function promoteToLeader(fighterId) {
 const SCENARIO_TYPES = {
     intensification: {
         name: "Intensification de la bataille",
-        desc: "Choisissez 3 guerriers. Le programme tirera 1 à 3 guerriers aléatoires. Vous pourrez ensuite choisir jusqu'à 5 renforts."
+        desc: "Choisissez 3 guerriers. Mettez-vous d'accord avec votre adversaire sur un nombre (1 à 3) de guerriers supplémentaires : le programme les tirera au hasard dans le reste de votre liste. Vous pourrez ensuite choisir jusqu'à 5 renforts. D3 renforts arriveront en jeu à partir du second round."
     },
     donnez_tout: {
         name: "Donnez tout !",
@@ -562,7 +562,7 @@ const SCENARIO_TYPES = {
     },
     attaque_surprise: {
         name: "Attaque surprise !",
-        desc: "Attaquant (4 choisis + 4 au hasard) | Défenseur (3 choisis + jusqu'à 7 renforts)."
+        desc: "Attaquant (4 choisis + 4 au hasard) | Défenseur (3 choisis + jusqu'à 7 renforts). D3 renforts arriveront en jeu à partir du second round."
     },
     force_intervention: {
         name: "Force d'intervention",
@@ -570,7 +570,7 @@ const SCENARIO_TYPES = {
     },
     force_reconnaissance: {
         name: "Force de reconnaissance",
-        desc: "Le programme détermine un nombre (1 à 3) de guerriers à choisir, puis ajoute 5 guerriers au hasard."
+        desc: "Mettez-vous d'accord avec votre adversaire sur un nombre (1 à 3) de guerriers à choisir, puis le programme ajoute 5 guerriers au hasard."
     }
 };
 
@@ -578,7 +578,14 @@ let setupState = {
     scenarioKey: 'intensification',
     role: 'attacker',
     step: 1,
-    reconCount: Math.floor(Math.random() * 3) + 1,
+    // Nombre de guerriers concernés (1 à 3), à convenir entre les deux joueurs
+    // avant de lancer les tirages. Utilisé par Intensification de la bataille
+    // (nombre de guerriers supplémentaires tirés au hasard, en plus des 3
+    // choisis) et Force de reconnaissance (nombre de guerriers à choisir dans
+    // l'escouade de reconnaissance). Doit être choisi explicitement (null par
+    // défaut) : un tirage aléatoire indépendant par joueur donnerait deux
+    // effectifs différents entre les deux camps.
+    manualCount: null,
     initialPickedIds: [],
     randomDrawnIds: [],
     reinforcementPickedIds: [],
@@ -598,7 +605,7 @@ function resetSetupState() {
         scenarioKey: 'intensification',
         role: 'attacker',
         step: 1,
-        reconCount: Math.floor(Math.random() * 3) + 1,
+        manualCount: null,
         initialPickedIds: [],
         randomDrawnIds: [],
         reinforcementPickedIds: [],
@@ -845,6 +852,20 @@ function renderGameSetup(container) {
                 </div>
             ` : ''}
 
+            ${(setupState.scenarioKey === 'intensification' || setupState.scenarioKey === 'force_reconnaissance') ? `
+                <div style="margin-bottom:12px; background:#111; border:1px solid var(--accent-cyan); padding:10px; border-radius:5px;">
+                    <label style="font-weight:bold; display:block; margin-bottom:6px;">
+                        Nombre de guerriers concernés (à convenir avec votre adversaire — les deux joueurs doivent saisir le même nombre) :
+                    </label>
+                    ${[1, 2, 3].map(n => `
+                        <label style="margin-right:18px; cursor:pointer;">
+                            <input type="radio" name="manual-count" value="${n}" ${setupState.manualCount === n ? 'checked' : ''} onchange="setManualCount(${n})"> ${n}
+                        </label>
+                    `).join('')}
+                    ${setupState.manualCount === null ? `<div style="color:var(--accent-purple); font-size:12px; margin-top:6px;">⚠️ Choisissez un nombre pour continuer.</div>` : ''}
+                </div>
+            ` : ''}
+
             <hr style="border-color:#333; margin:15px 0;">
     `;
 
@@ -893,9 +914,17 @@ function renderStep1View(availableMembers) {
         labelHelp = "Choisissez jusqu'à 5 guerriers.";
     }
     else if (key === 'force_reconnaissance') { 
-        let req = Math.min(setupState.reconCount, availableMembers.length);
+        if (setupState.manualCount === null) {
+            return `
+                <h3>Étape 1 : Choix initial des combattants</h3>
+                <p style="color:var(--accent-purple); padding:10px; background:#111; border-radius:5px; border:1px solid #333;">
+                    ⚠️ Choisissez d'abord, ci-dessus, le nombre de guerriers concernés (1 à 3) — à convenir avec votre adversaire.
+                </p>
+            `;
+        }
+        let req = Math.min(setupState.manualCount, availableMembers.length);
         maxSelect = req;
-        labelHelp = `🎲 Tirage Force de reconnaissance : vous devez choisir ${req} guerrier(s).`; 
+        labelHelp = `Vous devez choisir ${req} guerrier(s) (nombre convenu avec votre adversaire).`; 
     }
 
     let html = `
@@ -931,6 +960,9 @@ function renderStep1View(availableMembers) {
         initCampaignTactics();
         html += renderTacticsSelectionHTML(setupState.selectedTacticsIds, isQuick ? 'quick' : 'campaign');
         html += `<button id="launch-game-direct-btn" class="btn btn-cyan" onclick="startGame()">${isQuick ? '⚡ Lancer la Partie Rapide' : '⚔️ Lancer la Partie'} (${setupState.initialPickedIds.length} guerriers)</button>`;
+    } else if (key === 'intensification' && setupState.manualCount === null) {
+        html += `<p style="color:var(--accent-purple); font-size:12px;">⚠️ Choisissez d'abord, ci-dessus, le nombre de guerriers supplémentaires (1 à 3) à tirer au hasard — à convenir avec votre adversaire.</p>`;
+        html += `<button class="btn" disabled style="opacity:0.5; cursor:not-allowed;">🎲 Valider l'étape 1 et procéder aux tirages/renforts</button>`;
     } else {
         html += `<button class="btn btn-cyan" onclick="validateStep1()">🎲 Valider l'étape 1 et procéder aux tirages/renforts</button>`;
     }
@@ -1018,6 +1050,15 @@ function changeRole(role) {
     renderGameSetup(document.getElementById('main-content'));
 }
 
+function setManualCount(n) {
+    setupState.manualCount = n;
+    // Le nombre concerné change ce qui est requis/tiré à l'étape 1 : on
+    // réinitialise les sélections déjà faites pour éviter un état incohérent
+    // (ex: 2 guerriers cochés alors que le nouveau nombre en impose 3).
+    setupState.initialPickedIds = [];
+    renderGameSetup(document.getElementById('main-content'));
+}
+
 function toggleInitialPick(id, maxLimit) {
     let idx = setupState.initialPickedIds.indexOf(id);
     if (idx >= 0) {
@@ -1074,8 +1115,8 @@ function validateStep1() {
     if (key === 'intensification') {
         let req = Math.min(3, availableMembers.length);
         if (setupState.initialPickedIds.length !== req) return showToast(`Veuillez choisir exactement ${req} guerrier(s).`, "error");
-        let nbRandom = Math.floor(Math.random() * 3) + 1;
-        let drawn = getRandomFighters(remainingPool, nbRandom);
+        if (setupState.manualCount === null) return showToast("Choisissez d'abord le nombre de guerriers supplémentaires (1 à 3).", "error");
+        let drawn = getRandomFighters(remainingPool, setupState.manualCount);
         setupState.randomDrawnIds = drawn.map(m => m.id);
     } 
     else if (key === 'patrouille') {
@@ -1096,7 +1137,8 @@ function validateStep1() {
         }
     }
     else if (key === 'force_reconnaissance') {
-        let req = Math.min(setupState.reconCount, availableMembers.length);
+        if (setupState.manualCount === null) return showToast("Choisissez d'abord le nombre de guerriers concernés (1 à 3).", "error");
+        let req = Math.min(setupState.manualCount, availableMembers.length);
         if (setupState.initialPickedIds.length !== req) return showToast(`Veuillez choisir exactement ${req} guerrier(s).`, "error");
         let drawn = getRandomFighters(remainingPool, 5);
         setupState.randomDrawnIds = drawn.map(m => m.id);
