@@ -609,6 +609,32 @@ function getArmorStatDeltas(m) {
 // Formate une statistique en tenant compte d'un delta d'armure : retourne
 // "nouvelle_valeur (ancienne_valeur)" si un delta s'applique, sinon la valeur
 // brute inchangée. N'affecte jamais m.stats — purement un affichage dérivé.
+// Synchronise les armes intégrées données par compétence (voir
+// INNATE_WEAPONS_BY_SKILL dans data.js) sur un combattant donné : ajoute
+// celles dont la compétence source est possédée, retire celles dont ce n'est
+// plus le cas. Idempotent, sans effet si aucune compétence concernée.
+// Utilisée à la fois pour les combattants déjà sauvegardés du gang
+// (ensureInnateFighterSkills) et pour la fiche en cours d'édition
+// (renderFighterEdit), afin que l'arme apparaisse dès que la compétence est
+// cochée, sans attendre la sauvegarde.
+function syncInnateWeaponsForFighter(m) {
+    if (!m || typeof INNATE_WEAPONS_BY_SKILL === 'undefined') return;
+    if (!m.weapons) m.weapons = [];
+    let ownedSkillIds = (m.skills || []).map(s => s && s.id).filter(Boolean);
+    let expectedInnateIds = ownedSkillIds
+        .filter(sid => INNATE_WEAPONS_BY_SKILL[sid])
+        .map(sid => INNATE_WEAPONS_BY_SKILL[sid].id);
+
+    m.weapons = m.weapons.filter(w => !w.isInnateWeapon || expectedInnateIds.includes(w.id));
+
+    expectedInnateIds.forEach(wid => {
+        if (!m.weapons.some(w => w.id === wid)) {
+            let def = Object.values(INNATE_WEAPONS_BY_SKILL).find(d => d.id === wid);
+            if (def) m.weapons.push(JSON.parse(JSON.stringify(def)));
+        }
+    });
+}
+
 function formatStatWithArmorDelta(rawValue, delta) {
     if (rawValue === undefined || rawValue === null || rawValue === '' || rawValue === '-') return '-';
     if (!delta) return rawValue;

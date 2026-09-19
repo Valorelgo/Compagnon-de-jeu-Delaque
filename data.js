@@ -470,3 +470,21 @@ const db = {
         "Folie": "Quand un guerrier atteint de folie s'active, jeter un dé sur le tableau de folie pour voir comment il va agir. À la fin de son activation, un jet de Will réussi annule la condition folie."
     }
 };
+
+// ===== ARMES INTÉGRÉES DONNÉES PAR COMPÉTENCE =====
+// Certaines compétences décrivent une "arme intégrée" dans leur texte (ex :
+// Headbutt). Cette table associe l'id de la compétence à la définition
+// complète de l'arme correspondante (mêmes champs qu'une arme normale de
+// db.weapons). La synchronisation automatique (voir ensureInnateFighterSkills
+// dans gang-views.js) l'ajoute/la retire de la liste d'armes du combattant en
+// fonction de ses compétences actuelles, sans jamais compter dans ses
+// emplacements d'arme (voir getWeaponSlotCost) ni dans son coût (0 crédit).
+const INNATE_WEAPONS_BY_SKILL = {
+    "sk_coup_boule": {
+        id: "wpn_headbutt",
+        name: "Headbutt",
+        profiles: [{ name: "Unique", SR: "E", LR: "-", S: "S+1", AP: "-", L: 1, traits: "Melee, attaque additionnelle (1)" }],
+        cost_credits: 0,
+        isInnateWeapon: true
+    }
+};

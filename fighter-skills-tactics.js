@@ -148,7 +148,7 @@ function openSkillModal() {
         }
     }
 
-    html += `</div><br><button class="btn" onclick="closeModal()">Fermer</button>`;
+    html += `</div><br><button class="btn" onclick="closeModal(); if (typeof tempFighter !== 'undefined' && tempFighter) renderFighterEdit(document.getElementById('main-content'));">Fermer</button>`;
     openModal("Menu des Compétences (Création)", html, true);
 }
 

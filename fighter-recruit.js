@@ -410,6 +410,7 @@ function editFighter(idx) {
 
 function renderFighterEdit(container) {
     const m = tempFighter;
+    syncInnateWeaponsForFighter(m);
     m.totalCost = calculateFighterCost(m);
     const char = db.characters.find(c => c.id === m.charId);
 
@@ -468,9 +469,12 @@ function renderFighterEdit(container) {
                             • <strong>${w.name}</strong> (${w.cost_credits||0}c) ${isTwoSlots ? `<span style="color:var(--accent-purple); font-size:11px; margin-left:6px;">(${slotCost === 1 ? '1 emp. grâce aux Suspensors' : '2 emplacements'})</span>` : ''}
                             ${statsText ? `<br><small style="color:#aaa; font-size:11px; margin-left:12px;">${statsText}</small>` : ''}
                             ${lockedOptionsHTML}
-                            ${w.accessory ? `<br><small style="color:var(--accent-cyan); margin-left:12px;">↳ Accessoire (1 max) : ${w.accessory.name} ${w.accessory.effect ? `— <em>${w.accessory.effect}</em>` : ''} ${w.accessory.fromStash ? '<span style="color:#2ecc71;">(Réserve - 0c)</span>' : `(${w.accessory.cost_credits||0}c)`} ${!isBeast && (!isMerc || isHiveScum) ? `<button class="btn-danger" style="padding:2px 6px; font-size:10px; margin-left:5px;" onclick="removeWeaponAccessory(${i})">Retirer accessoire</button>` : ''}</small>` : (!isBeast && (!isMerc || isHiveScum) ? `<br><button style="padding:2px 6px; font-size:11px; margin-left:12px; margin-top:4px;" onclick="openWeaponAccessoryModal(${i})">+ Ajouter un accessoire (1 max)</button>` : '')}
+                            ${w.accessory ? `<br><small style="color:var(--accent-cyan); margin-left:12px;">↳ Accessoire (1 max) : ${w.accessory.name} ${w.accessory.effect ? `— <em>${w.accessory.effect}</em>` : ''} ${w.accessory.fromStash ? '<span style="color:#2ecc71;">(Réserve - 0c)</span>' : `(${w.accessory.cost_credits||0}c)`} ${!isBeast && !w.isInnateWeapon && (!isMerc || isHiveScum) ? `<button class="btn-danger" style="padding:2px 6px; font-size:10px; margin-left:5px;" onclick="removeWeaponAccessory(${i})">Retirer accessoire</button>` : ''}</small>` : (!isBeast && !w.isInnateWeapon && (!isMerc || isHiveScum) ? `<br><button style="padding:2px 6px; font-size:11px; margin-left:12px; margin-top:4px;" onclick="openWeaponAccessoryModal(${i})">+ Ajouter un accessoire (1 max)</button>` : '')}
                         </div>
-                        <button class="btn-danger" style="padding:2px 6px; font-size:11px; flex-shrink:0;" onclick="removeWeapon(${i})" title="${currentGang && currentGang.isEstablished ? 'Déséquiper et envoyer dans la réserve (avec accessoire si équipé)' : 'Supprimer'}">${currentGang && currentGang.isEstablished ? 'Déséquiper' : 'Supprimer'}</button>
+                        ${w.isInnateWeapon
+                            ? `<span style="background:rgba(45,212,191,0.15); border:1px solid var(--accent-cyan); color:var(--accent-cyan); font-size:11px; font-weight:bold; padding:3px 8px; border-radius:10px; flex-shrink:0;" title="Arme intégrée, donnée automatiquement par une compétence">Innée</span>`
+                            : `<button class="btn-danger" style="padding:2px 6px; font-size:11px; flex-shrink:0;" onclick="removeWeapon(${i})" title="${currentGang && currentGang.isEstablished ? 'Déséquiper et envoyer dans la réserve (avec accessoire si équipé)' : 'Supprimer'}">${currentGang && currentGang.isEstablished ? 'Déséquiper' : 'Supprimer'}</button>`
+                        }
                     </div>
                     `;
                 }).join('')}

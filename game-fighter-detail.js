@@ -191,7 +191,7 @@ function openFighterDetailModal(idx) {
                                         <td>${formatMovementWithMount(m)}</td><td>${st.WS||'-'}</td><td>${st.BS||'-'}</td>
                                         <td>${st.S||'-'}</td><td>${st.T||'-'}</td><td>${st.W||'-'}</td>
                                         <td>${armorDeltas && armorDeltas.I !== undefined ? formatStatWithArmorDelta(st.I, armorDeltas.I) : (st.I||'-')}</td>
-                                        <td>${st.A||'-'}</td>
+                                        <td>${m.conditions && m.conditions['Frénésie'] ? formatStatWithArmorDelta(st.A, 1) : (st.A||'-')}</td>
                                         <td>${armorDeltas && armorDeltas.Sv !== undefined ? formatStatWithArmorDelta(st.Sv, armorDeltas.Sv) : (st.Sv||'-')}</td>
                                         <td>${st.Ld||'-'}</td><td>${st.Cl||'-'}</td><td>${st.Wil||'-'}</td>
                                         <td>${st.Int||'-'}</td>

@@ -334,6 +334,11 @@ function ensureInnateFighterSkills(gang) {
             }
         }
 
+        // Armes intégrées données par compétence (ex: Headbutt) : voir
+        // syncInnateWeaponsForFighter dans core-state.js (partagée avec la
+        // fiche en cours d'édition dans fighter-recruit.js).
+        syncInnateWeaponsForFighter(m);
+
         // Nettoyage de sécurité des blessures de convalescence si le guerrier n'est plus en recovery
         resolveEndedRecoveryInjuries(m);
     });
@@ -354,6 +359,7 @@ const ensureDeathMaidenPoisonBlood = ensureInnateFighterSkills;
 
 function getWeaponSlotCost(w) {
     if (!w || !w.name) return 1;
+    if (w.isInnateWeapon) return 0;
     if (w.counts_as_equip || w.type === 'Grenade' || (w.id && ((w.id.startsWith('wpn_grenade_') && w.id !== 'wpn_grenade_launcher') || w.id === 'wpn_charge_demo'))) {
         return 0;
     }
