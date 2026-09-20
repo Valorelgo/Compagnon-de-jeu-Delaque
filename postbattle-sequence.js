@@ -75,8 +75,8 @@ function renderPostBattleView(container) {
 
                                 let details = [];
                                 details.push('+1 Participation');
-                                if (gain.ooaKills > 0) details.push(`+${gain.ooaKills * 2} (${gain.ooaKills} ennemi(s) OOA)`);
-                                if (gain.seriouslyInjured > 0) details.push(`+${gain.seriouslyInjured} (Sér. blessé causé)`);
+                                if (gain.ooaKills > 0) details.push(`+${gain.ooaKills * getXPPerOOAKill()} (${gain.ooaKills} ennemi(s) OOA${(typeof activeGameTerritory !== 'undefined' && activeGameTerritory && activeGameTerritory.id === 'ter_fighting_pit') ? ', bonus Fighting pit inclus' : ''})`);
+                                if (gain.seriouslyInjured > 0) details.push(`+${gain.seriouslyInjured * getXPPerSeriousInjuryInflicted()} (Sér. blessé causé${(typeof activeGameTerritory !== 'undefined' && activeGameTerritory && activeGameTerritory.id === 'ter_fighting_pit') ? ', bonus Fighting pit inclus' : ''})`);
                                 if (gain.assistance > 0) details.push(`+${gain.assistance} (Assistance)`);
                                 if (gain.objective > 0) details.push(`+${gain.objective} (Objectif)`);
                                 if (gain.scenario > 0) details.push(`+${gain.scenario} (Scénario)`);

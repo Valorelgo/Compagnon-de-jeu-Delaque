@@ -696,6 +696,17 @@ function saveMatchToHistory() {
     let credSecondary = parseInt(document.getElementById('hist-cred-secondary')?.value) || 0;
     let totalCredits = credPrimary + credSecondary;
 
+    // Territoire "Corpse farm" en jeu pour cette partie : +10 crédits par
+    // ennemi mis hors de combat (voir activeGameTerritory, fixé au lancement
+    // de la partie et toujours actif à ce stade post-bataille).
+    let corpseFarmBonus = 0;
+    if (typeof activeGameTerritory !== 'undefined' && activeGameTerritory && activeGameTerritory.id === 'ter_corpse_farm') {
+        let totalEnemiesOOA = (typeof currentGameRoster !== 'undefined' ? currentGameRoster : [])
+            .reduce((sum, m) => sum + ((m.liveXP && m.liveXP.ooaKills) ? m.liveXP.ooaKills : 0), 0);
+        corpseFarmBonus = totalEnemiesOOA * 10;
+        totalCredits += corpseFarmBonus;
+    }
+
     let repChange = parseInt(document.getElementById('hist-rep')?.value) || 0;
 
     let gainedTer = document.getElementById('hist-ter-gained')?.value || '';
@@ -729,10 +740,15 @@ function saveMatchToHistory() {
         result: result,
         primaryCredits: credPrimary,
         secondaryCredits: credSecondary,
+        corpseFarmBonus: corpseFarmBonus,
         totalCredits: totalCredits,
         repChange: repChange,
         territory: territorySummary
     });
+
+    if (corpseFarmBonus > 0) {
+        showToast(`Territoire Corpse farm : +${corpseFarmBonus} cr (ennemis mis hors de combat) ajoutés aux gains.`, "success");
+    }
 
     safeSave();
     updateGameTopBar();

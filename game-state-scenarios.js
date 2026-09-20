@@ -6,6 +6,11 @@
 // db, openModal, showToast...).
 
 let currentGameRoster = [];
+// Territoire joué pour la partie en cours (choisi au setup, voir setupState.territoryId
+// et startGame()) : { id, name, battleEffect, ... } ou null si non spécifié. Reste actif
+// jusqu'au lancement de la partie suivante (utilisé par le bandeau en jeu, le bonus de
+// Ld de Mess Shack, les crédits de Corpse farm et le bonus d'XP de Fighting pit).
+let activeGameTerritory = null;
 let gameTactics = [];
 let gameScores = {
     myScore: 0,
@@ -576,6 +581,7 @@ const SCENARIO_TYPES = {
 
 let setupState = {
     scenarioKey: 'intensification',
+    territoryId: '',
     role: 'attacker',
     step: 1,
     // Nombre de guerriers concernés (1 à 3), à convenir entre les deux joueurs
@@ -603,6 +609,7 @@ let quickMatchInitialized = false;
 function resetSetupState() {
     setupState = {
         scenarioKey: 'intensification',
+        territoryId: '',
         role: 'attacker',
         step: 1,
         manualCount: null,
@@ -811,6 +818,20 @@ function renderGameSetup(container) {
                 </span>
             </div>
             ${isQuick ? `<p style="color:#aaa; font-size:13px; margin-bottom:12px;">Même sélection de scénarios, règles de recrutement d'escouade et cartes tactiques que le mode campagne, sans impact sur les crédits, XP ni blessures permanentes du gang.</p>` : ''}
+
+            <div style="margin-bottom:12px;">
+                <label style="font-weight:bold;">Territoire joué (facultatif) :</label>
+                <select id="territory-select" style="width:100%; padding:8px; margin-top:4px; background:#222; color:#fff; border:1px solid var(--accent-cyan);" onchange="changeTerritory(this.value)">
+                    <option value="">-- Aucun / non spécifié --</option>
+                    ${(typeof db !== 'undefined' && db.territories ? db.territories : []).map(t => `
+                        <option value="${t.id}" ${setupState.territoryId === t.id ? 'selected' : ''}>${t.name}</option>
+                    `).join('')}
+                </select>
+                ${setupState.territoryId ? (() => {
+                    let t = db.territories.find(x => x.id === setupState.territoryId);
+                    return t ? `<div style="background:#181824; border:1px solid var(--accent-cyan); padding:8px 10px; border-radius:5px; margin-top:6px; font-size:12px;"><strong style="color:var(--accent-cyan);">${t.name}</strong> — ${t.battleEffect || ''}</div>` : '';
+                })() : ''}
+            </div>
             
             <div style="margin-bottom:12px;">
                 <label style="font-weight:bold;">Type de recrutement / Scénario :</label>
@@ -1039,8 +1060,15 @@ function renderStep2View(availableMembers) {
 }
 
 function changeScenario(key) {
+    let keepTerritoryId = setupState.territoryId;
     resetSetupState();
     setupState.scenarioKey = key;
+    setupState.territoryId = keepTerritoryId;
+    renderGameSetup(document.getElementById('main-content'));
+}
+
+function changeTerritory(id) {
+    setupState.territoryId = id || '';
     renderGameSetup(document.getElementById('main-content'));
 }
 
@@ -1150,6 +1178,10 @@ function validateStep1() {
 
 function startGame() {
     let isQuick = typeof appState !== 'undefined' && appState.isQuickMatch;
+
+    activeGameTerritory = (setupState.territoryId && typeof db !== 'undefined' && db.territories)
+        ? (db.territories.find(t => t.id === setupState.territoryId) || null)
+        : null;
 
     let totalInitial = setupState.initialPickedIds.length;
     if (totalInitial === 0 && setupState.randomDrawnIds.length === 0) {
@@ -1386,9 +1418,19 @@ function adjLiveXP(fighterIdx, key, delta) {
     renderGameView(document.getElementById('main-content'));
 }
 
+// Valeur en XP d'un ennemi mis Hors de Combat / Sérieusement blessé par le
+// guerrier, incluant le bonus du territoire "Fighting pit" (+1 XP par
+// occurrence) si celui-ci est en jeu pour cette partie (voir activeGameTerritory).
+function getXPPerOOAKill() {
+    return 2 + ((typeof activeGameTerritory !== 'undefined' && activeGameTerritory && activeGameTerritory.id === 'ter_fighting_pit') ? 1 : 0);
+}
+function getXPPerSeriousInjuryInflicted() {
+    return 1 + ((typeof activeGameTerritory !== 'undefined' && activeGameTerritory && activeGameTerritory.id === 'ter_fighting_pit') ? 1 : 0);
+}
+
 function getFighterBattleXP(m) {
     if (!m) return 1;
     let lx = m.liveXP || { assistance: 0, objective: 0, seriouslyInjured: 0, scenario: 0, ooaKills: 0 };
-    return 1 + (lx.assistance || 0) + (lx.objective || 0) + (lx.seriouslyInjured || 0) + (lx.scenario || 0) + ((lx.ooaKills || 0) * 2);
+    return 1 + (lx.assistance || 0) + (lx.objective || 0) + ((lx.seriouslyInjured || 0) * getXPPerSeriousInjuryInflicted()) + (lx.scenario || 0) + ((lx.ooaKills || 0) * getXPPerOOAKill());
 }
 

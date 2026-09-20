@@ -29,6 +29,9 @@ function renderGameView(container) {
             <!-- BANDEAU SCORE ET PRIORITÉ -->
             ${renderGameScorePriorityBanner()}
 
+            <!-- BANDEAU TERRITOIRE JOUÉ -->
+            ${renderActiveTerritoryBanner()}
+
             <!-- CARTES TACTIQUES DIRECTEMENT VISIBLES DANS LA PARTIE -->
             ${(gameTactics && gameTactics.length > 0) ? `
             <div style="margin-top:10px; border-top:1px solid #333; padding-top:8px;">

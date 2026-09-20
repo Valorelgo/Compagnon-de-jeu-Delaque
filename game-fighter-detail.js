@@ -193,7 +193,7 @@ function openFighterDetailModal(idx) {
                                         <td>${armorDeltas && armorDeltas.I !== undefined ? formatStatWithArmorDelta(st.I, armorDeltas.I) : (st.I||'-')}</td>
                                         <td>${m.conditions && m.conditions['Frénésie'] ? formatStatWithArmorDelta(st.A, 1) : (st.A||'-')}</td>
                                         <td>${armorDeltas && armorDeltas.Sv !== undefined ? formatStatWithArmorDelta(st.Sv, armorDeltas.Sv) : (st.Sv||'-')}</td>
-                                        <td>${st.Ld||'-'}</td><td>${st.Cl||'-'}</td><td>${st.Wil||'-'}</td>
+                                        <td>${(typeof activeGameTerritory !== 'undefined' && activeGameTerritory && activeGameTerritory.id === 'ter_mess_shack') ? formatStatWithArmorDelta(st.Ld, 1) : (st.Ld||'-')}</td><td>${st.Cl||'-'}</td><td>${st.Wil||'-'}</td>
                                         <td>${st.Int||'-'}</td>
                                     </tr>
                                 </tbody>
@@ -453,6 +453,19 @@ function updateHatredTarget(fIdx, value) {
     if (currentGameRoster[fIdx]) {
         currentGameRoster[fIdx].hatredTarget = (value || '').trim();
     }
+}
+
+// Bandeau visible en haut de la partie en cours, rappelant le territoire joué
+// (choisi au setup, voir setupState.territoryId et startGame()) et son effet
+// de jeu. Absent si aucun territoire n'a été spécifié pour cette partie.
+function renderActiveTerritoryBanner() {
+    if (typeof activeGameTerritory === 'undefined' || !activeGameTerritory) return '';
+    return `
+        <div style="margin-top:8px; padding:8px 14px; background:#181824; border:1px solid var(--accent-cyan); border-radius:8px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <span style="font-size:13px; font-weight:bold; color:var(--accent-cyan); text-transform:uppercase; letter-spacing:0.5px;">🚩 Territoire : ${activeGameTerritory.name}</span>
+            <span style="font-size:12px; color:#ddd;">${activeGameTerritory.battleEffect || ''}</span>
+        </div>
+    `;
 }
 
 function renderGameScorePriorityBanner() {
