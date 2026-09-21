@@ -145,13 +145,15 @@ function quickEquipStashItem(itemName, fighterId) {
     let stItem = currentGang.stash[sIdx];
     let itemType = (typeof stItem === 'object' && stItem.type) ? stItem.type : '';
 
-    // Un familier de la réserve n'est pas un objet ordinaire : reprendre sa
-    // fiche complète (stats, armes, compétences), comme à l'achat ou à la
-    // reprise depuis la fiche du combattant (voir adoptFamiliarFromStash),
-    // plutôt que de l'ajouter tel quel comme une ligne d'équipement inerte.
+    // Familier : ne doit jamais être traité comme un simple objet d'équipement.
+    // Il faut recréer sa fiche complète de combattant (stats, compétences...) via
+    // createFamiliarMemberObject, exactement comme adoptFamiliarFromStash() le
+    // fait déjà depuis la fiche du combattant — sinon on se retrouve avec un
+    // objet inerte dans l'équipement, sans figurine jouable derrière.
     if (itemType === 'Familier') {
-        let charDef = (typeof stItem === 'object' && stItem.familiarCharId) ? db.characters.find(c => c.id === stItem.familiarCharId) : null;
-        if (!charDef) return showToast("Profil de familier introuvable dans la réserve.", "error");
+        let familiarCharId = (typeof stItem === 'object') ? stItem.familiarCharId : null;
+        let charDef = familiarCharId ? db.characters.find(c => c.id === familiarCharId) : null;
+        if (!charDef) return showToast("Ce familier ne peut pas être identifié (donnée de réserve obsolète ou corrompue).", "error");
 
         currentGang.stash.splice(sIdx, 1);
 
@@ -170,9 +172,8 @@ function quickEquipStashItem(itemName, fighterId) {
             fromStash: true
         });
 
-        calculateGangRating(currentGang);
         saveGangs();
-        showToast(`"${charDef.name}" (repris de la réserve) est rattaché à ${m.customName} !`, "success");
+        showToast(`${charDef.name} (repris de la réserve) est rattaché à ${m.customName} !`, "success");
         openStashModal();
         return;
     }
@@ -694,18 +695,15 @@ function saveMatchToHistory() {
 
     let credPrimary = parseInt(document.getElementById('hist-cred-primary')?.value) || 0;
     let credSecondary = parseInt(document.getElementById('hist-cred-secondary')?.value) || 0;
-    let totalCredits = credPrimary + credSecondary;
 
-    // Territoire "Corpse farm" en jeu pour cette partie : +10 crédits par
-    // ennemi mis hors de combat (voir activeGameTerritory, fixé au lancement
-    // de la partie et toujours actif à ce stade post-bataille).
-    let corpseFarmBonus = 0;
-    if (typeof activeGameTerritory !== 'undefined' && activeGameTerritory && activeGameTerritory.id === 'ter_corpse_farm') {
-        let totalEnemiesOOA = (typeof currentGameRoster !== 'undefined' ? currentGameRoster : [])
-            .reduce((sum, m) => sum + ((m.liveXP && m.liveXP.ooaKills) ? m.liveXP.ooaKills : 0), 0);
-        corpseFarmBonus = totalEnemiesOOA * 10;
-        totalCredits += corpseFarmBonus;
-    }
+    // Territoire Corpse Farm (voir battleCreditsPerOOA dans db.territories) :
+    // +X crédits par ennemi mis hors de combat pendant la partie, ajoutés
+    // automatiquement (voir aussi l'affichage informatif dans renderPostBattleView).
+    let battleTerritoryDef = (typeof gameScores !== 'undefined' && gameScores) ? getTerritoryDef(gameScores.territoryId) : null;
+    let totalEnemiesOOAForCredits = (typeof currentGameRoster !== 'undefined' ? currentGameRoster : []).reduce((sum, m) => sum + ((m.liveXP && m.liveXP.ooaKills) ? m.liveXP.ooaKills : 0), 0);
+    let corpseFarmBonus = (battleTerritoryDef && battleTerritoryDef.battleCreditsPerOOA) ? totalEnemiesOOAForCredits * battleTerritoryDef.battleCreditsPerOOA : 0;
+
+    let totalCredits = credPrimary + credSecondary + corpseFarmBonus;
 
     let repChange = parseInt(document.getElementById('hist-rep')?.value) || 0;
 
@@ -740,15 +738,11 @@ function saveMatchToHistory() {
         result: result,
         primaryCredits: credPrimary,
         secondaryCredits: credSecondary,
-        corpseFarmBonus: corpseFarmBonus,
+        territoryBonusCredits: corpseFarmBonus,
         totalCredits: totalCredits,
         repChange: repChange,
         territory: territorySummary
     });
-
-    if (corpseFarmBonus > 0) {
-        showToast(`Territoire Corpse farm : +${corpseFarmBonus} cr (ennemis mis hors de combat) ajoutés aux gains.`, "success");
-    }
 
     safeSave();
     updateGameTopBar();
