@@ -164,6 +164,9 @@ function openFighterDetailModal(idx) {
                             <option value="Out of action" ${m.status === 'Out of action' ? 'selected' : ''}>Out of action</option>
                             <option value="Fuyard" ${m.status === 'Fuyard' ? 'selected' : ''}>🏃 Fuyard</option>
                         </select>
+                        ${m.status === 'Sérieusement blessé' ? `
+                            <button class="btn-danger" style="padding:4px 8px; font-size:11px; margin:0;" onclick="openLeaveBattlefieldModal(${idx})" title="Jet de 1D6 : 1-2 Hors de Combat, 3-6 indemne">🚪 Quitter le combat</button>
+                        ` : ''}
                     </div>
                 </div>
             </div>
@@ -327,6 +330,47 @@ function adjHP(idx, amount) {
         if (modalOverlay && !modalOverlay.classList.contains('hidden')) {
             openFighterDetailModal(idx);
         }
+        renderGameView(document.getElementById('main-content'));
+    }
+}
+
+// Jet de "Sérieusement blessé qui tente de quitter le combat / termine la
+// partie ainsi" : 1D6 physique, 1-2 = Hors de Combat (blessure permanente à
+// traiter en après-bataille), 3-6 = indemne. Utilisé à la fois pendant la
+// partie (openLeaveBattlefieldModal, sur action volontaire du joueur) et en
+// fin de partie pour tout combattant encore Sérieusement blessé ou ayant fui
+// en l'étant sans avoir encore résolu ce jet (voir renderSeriouslyInjuredEndGameModal).
+function openLeaveBattlefieldModal(idx) {
+    let m = currentGameRoster[idx];
+    if (!m) return;
+    let html = `
+        <div style="padding:6px 0;">
+            <p style="font-size:14px; color:#eee; margin-bottom:14px;">
+                <strong>${m.customName}</strong> tente de quitter le combat.<br>
+                📋 <strong>Règle :</strong> jetez 1D6 sur un dé physique. Sur <strong>1-2</strong>, il finit <strong>Hors de Combat</strong> (blessure permanente à traiter en après-bataille). Sur <strong>3-6</strong>, il s'en sort indemne.
+            </p>
+            <div style="display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap;">
+                <button class="btn" style="margin:0;" onclick="closeModal();">Annuler</button>
+                <button class="btn-danger" style="margin:0;" onclick="resolveLeaveBattlefieldRoll(${idx}, true)">1-2 : Hors de Combat</button>
+                <button class="btn btn-cyan" style="margin:0;" onclick="resolveLeaveBattlefieldRoll(${idx}, false)">3-6 : Indemne</button>
+            </div>
+        </div>
+    `;
+    openModal("Quitter le combat — Sérieusement blessé", html);
+}
+
+function resolveLeaveBattlefieldRoll(idx, isOOA) {
+    if (!currentGameRoster[idx]) return;
+    closeModal();
+    if (isOOA) {
+        updateFighterStatus(idx, 'Out of action');
+    } else {
+        updateFighterStatus(idx, 'Fuyard');
+        // Jet réussi : quitte le combat indemne, pas de blessure permanente à
+        // traiter en après-bataille (updateFighterStatus, appelé ci-dessus,
+        // positionne ce flag à true par défaut pour toute transition Sérieusement
+        // blessé → Fuyard : on le corrige ici pour ce cas précis, résolu sain et sauf).
+        currentGameRoster[idx].wasSeriouslyInjuredWhenFled = false;
         renderGameView(document.getElementById('main-content'));
     }
 }

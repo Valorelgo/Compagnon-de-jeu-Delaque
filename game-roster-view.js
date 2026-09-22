@@ -170,6 +170,10 @@ function renderGameView(container) {
                                 </select>
                             </div>
 
+                            ${m.status === 'Sérieusement blessé' ? `
+                                <button class="btn-danger" style="padding:3px 8px; font-size:11px;" onclick="openLeaveBattlefieldModal(${idx})" title="Jet de 1D6 : 1-2 Hors de Combat, 3-6 indemne">🚪 Quitter le combat</button>
+                            ` : ''}
+
                             <div>
                                 <label style="cursor:${isFuyard ? 'not-allowed' : 'pointer'}; font-size:11px; opacity:${isFuyard ? '0.4' : '1'};">
                                     <input type="checkbox" ${m.activated ? 'checked' : ''} ${isFuyard ? 'disabled' : ''} onchange="toggleActivation(${idx})"> Activé
@@ -771,7 +775,7 @@ function openEndOrQuitGameModal() {
             
             <div style="display:flex; flex-direction:column; gap:12px;">
                 ${!isQuick ? `
-                    <button class="btn btn-cyan" style="padding:14px; text-align:left; margin:0; width:100%;" onclick="closeModal(); processEndGame();">
+                    <button class="btn btn-cyan" style="padding:14px; text-align:left; margin:0; width:100%;" onclick="closeModal(); attemptProcessEndGame();">
                         <strong style="font-size:15px; display:block; color:var(--accent-cyan);">🏁 Terminer la Partie & Passer au Post-Bataille</strong>
                         <span style="font-size:12px; color:#ddd; text-transform:none; font-weight:normal; display:block; margin-top:4px;">
                             Enregistre les combattants Out of Action (OOA), valide les gains d'XP en direct et accède aux jets de blessures durables.
@@ -803,6 +807,75 @@ function openEndOrQuitGameModal() {
     `;
 
     openModal("Quitter ou Terminer la Partie", html);
+}
+
+let _siEndGameResolvedLog = [];
+
+// Avant de terminer la partie, vérifie s'il reste des combattants dont le jet
+// "Sérieusement blessé" (1D6 : 1-2 Hors de Combat, 3-6 indemne) n'a pas encore
+// été résolu — soit parce qu'ils sont restés Sérieusement blessé jusqu'à la
+// fin, soit parce qu'ils ont fui en l'étant (Bottle check) sans avoir encore
+// fait ce jet (voir wasSeriouslyInjuredWhenFled). Si c'est le cas, ouvre la
+// fenêtre de résolution au lieu de terminer directement.
+function attemptProcessEndGame() {
+    _siEndGameResolvedLog = [];
+    let pending = (currentGameRoster || []).filter(m =>
+        !m.isFamiliar && (m.status === 'Sérieusement blessé' || (m.status === 'Fuyard' && m.wasSeriouslyInjuredWhenFled === true))
+    );
+    if (pending.length > 0) {
+        renderSeriouslyInjuredEndGameModal();
+        return;
+    }
+    processEndGame();
+}
+
+function renderSeriouslyInjuredEndGameModal() {
+    let pending = (currentGameRoster || []).filter(m =>
+        !m.isFamiliar && (m.status === 'Sérieusement blessé' || (m.status === 'Fuyard' && m.wasSeriouslyInjuredWhenFled === true))
+    );
+
+    let html = `
+        <div style="padding:6px 0;">
+            <div style="background:rgba(231,76,60,0.14); border:1px solid #e74c3c; border-radius:8px; padding:12px; margin-bottom:14px; font-size:13px; color:#eee;">
+                📋 <strong>Règle :</strong> pour chaque combattant qui termine la partie Sérieusement blessé (ou qui a fui en l'étant), jetez 1D6 sur un dé physique : sur <strong>1-2</strong>, il finit <strong>Hors de Combat</strong> (blessure permanente à traiter en après-bataille) ; sur <strong>3-6</strong>, il s'en sort indemne.
+            </div>
+            <div style="display:flex; flex-direction:column; gap:10px;">
+                ${pending.map(m => `
+                    <div style="background:#161922; border:1px solid #2d3345; border-radius:6px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                        <div>
+                            <strong>${m.customName}</strong>
+                            <br><small style="color:#aaa;">${m.status === 'Fuyard' ? 'A fui le combat en étant Sérieusement blessé' : 'Termine la partie Sérieusement blessé'}</small>
+                        </div>
+                        <div style="display:flex; gap:8px;">
+                            <button class="btn-danger" style="padding:6px 12px; margin:0;" onclick="resolveSeriouslyInjuredEndGame('${m.id}', true)">1-2 : Hors de combat</button>
+                            <button class="btn btn-cyan" style="padding:6px 12px; margin:0;" onclick="resolveSeriouslyInjuredEndGame('${m.id}', false)">3-6 : Indemne</button>
+                        </div>
+                    </div>
+                `).join('')}
+                ${_siEndGameResolvedLog.map(r => `
+                    <div style="background:#12151d; border:1px solid #2d3345; border-radius:6px; padding:8px 12px; display:flex; justify-content:space-between; align-items:center;">
+                        <span>${r.name}</span>
+                        <span style="color:${r.ooa ? '#ff6b6b' : '#2ecc71'}; font-weight:bold; font-size:13px;">${r.ooa ? '💀 Hors de combat' : '✓ Indemne'}</span>
+                    </div>
+                `).join('')}
+            </div>
+            <div style="display:flex; justify-content:flex-end; margin-top:16px;">
+                <button class="btn btn-cyan" style="padding:8px 18px; margin:0; ${pending.length > 0 ? 'opacity:0.5; cursor:not-allowed;' : ''}" ${pending.length > 0 ? 'disabled' : ''} onclick="closeModal(); processEndGame();">
+                    ✓ Continuer vers le Post-Bataille
+                </button>
+            </div>
+        </div>
+    `;
+    openModal("Jets de Sérieusement Blessé (fin de partie)", html);
+}
+
+function resolveSeriouslyInjuredEndGame(fighterId, isOOA) {
+    let m = (currentGameRoster || []).find(x => x.id === fighterId);
+    if (!m) return;
+    m.status = isOOA ? 'Out of action' : 'Fuyard';
+    if (!isOOA) m.wasSeriouslyInjuredWhenFled = false;
+    _siEndGameResolvedLog.push({ name: m.customName, ooa: isOOA });
+    renderSeriouslyInjuredEndGameModal();
 }
 
 function processEndGame() {

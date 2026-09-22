@@ -145,15 +145,13 @@ function quickEquipStashItem(itemName, fighterId) {
     let stItem = currentGang.stash[sIdx];
     let itemType = (typeof stItem === 'object' && stItem.type) ? stItem.type : '';
 
-    // Familier : ne doit jamais être traité comme un simple objet d'équipement.
-    // Il faut recréer sa fiche complète de combattant (stats, compétences...) via
-    // createFamiliarMemberObject, exactement comme adoptFamiliarFromStash() le
-    // fait déjà depuis la fiche du combattant — sinon on se retrouve avec un
-    // objet inerte dans l'équipement, sans figurine jouable derrière.
+    // Un familier de la réserve n'est pas un objet ordinaire : reprendre sa
+    // fiche complète (stats, armes, compétences), comme à l'achat ou à la
+    // reprise depuis la fiche du combattant (voir adoptFamiliarFromStash),
+    // plutôt que de l'ajouter tel quel comme une ligne d'équipement inerte.
     if (itemType === 'Familier') {
-        let familiarCharId = (typeof stItem === 'object') ? stItem.familiarCharId : null;
-        let charDef = familiarCharId ? db.characters.find(c => c.id === familiarCharId) : null;
-        if (!charDef) return showToast("Ce familier ne peut pas être identifié (donnée de réserve obsolète ou corrompue).", "error");
+        let charDef = (typeof stItem === 'object' && stItem.familiarCharId) ? db.characters.find(c => c.id === stItem.familiarCharId) : null;
+        if (!charDef) return showToast("Profil de familier introuvable dans la réserve.", "error");
 
         currentGang.stash.splice(sIdx, 1);
 
@@ -172,8 +170,9 @@ function quickEquipStashItem(itemName, fighterId) {
             fromStash: true
         });
 
+        calculateGangRating(currentGang);
         saveGangs();
-        showToast(`${charDef.name} (repris de la réserve) est rattaché à ${m.customName} !`, "success");
+        showToast(`"${charDef.name}" (repris de la réserve) est rattaché à ${m.customName} !`, "success");
         openStashModal();
         return;
     }
@@ -361,6 +360,64 @@ function actionReputationBonus() {
 
     showToast(`Réputation du gang (${rep}) x10 : +${bonus} crédits ajoutés aux caisses du gang !`, "success");
     renderPostCycleView(document.getElementById('main-content'));
+}
+
+// Cycle de pause : événement ponctuel de milieu de campagne où tous les
+// joueurs reçoivent 250 crédits. Persiste sur le gang lui-même
+// (currentGang.pauseCycleUsed), PAS sur postCycleSession, car contrairement
+// au bonus de réputation ce n'est pas une action "une fois par cycle" mais
+// "une fois dans toute la campagne" : elle ne doit pas se réinitialiser à
+// chaque nouvelle session de Post-Cycle. Le bouton reste volontairement
+// cliquable même une fois utilisé (juste grisé) : un second clic affiche un
+// avertissement mais permet quand même de recréditer 250 cr si nécessaire.
+function actionPauseCycle() {
+    if (!currentGang) return;
+
+    if (!currentGang.pauseCycleUsed) {
+        showConfirmModal(
+            "Cycle de pause",
+            "Confirmer que c'est bien le cycle de pause de milieu de campagne ? Le gang recevra <strong>250 crédits</strong>.",
+            "Confirmer",
+            () => {
+                currentGang.credits = (currentGang.credits || 0) + 250;
+                currentGang.pauseCycleUsed = true;
+                safeSave();
+                showToast("Cycle de pause : +250 crédits ajoutés aux caisses du gang !", "success");
+                renderPostCycleView(document.getElementById('main-content'));
+            }
+        );
+    } else {
+        showConfirmModal(
+            "Cycle de pause déjà utilisé",
+            "⚠️ Attention, vous avez déjà utilisé le cycle de pause. Êtes-vous sûr de vouloir continuer ? Le gang recevra <strong>250 crédits</strong> supplémentaires.",
+            "Continuer quand même",
+            () => {
+                currentGang.credits = (currentGang.credits || 0) + 250;
+                safeSave();
+                showToast("Cycle de pause (à nouveau) : +250 crédits ajoutés aux caisses du gang !", "success");
+                renderPostCycleView(document.getElementById('main-content'));
+            }
+        );
+    }
+}
+
+// Annule un Cycle de pause déclenché par erreur : retire les 250 cr et
+// redonne au bouton principal son état "non utilisé".
+function actionUndoPauseCycle() {
+    if (!currentGang) return;
+    showConfirmModal(
+        "Annuler le Cycle de pause",
+        "Retirer les 250 crédits du Cycle de pause déclenché par erreur ?",
+        "Retirer 250 cr",
+        () => {
+            currentGang.credits = Math.max(0, (currentGang.credits || 0) - 250);
+            currentGang.pauseCycleUsed = false;
+            safeSave();
+            showToast("Cycle de pause annulé : -250 crédits.", "info");
+            renderPostCycleView(document.getElementById('main-content'));
+        },
+        "Annuler"
+    );
 }
 
 function collectAllTerritoryIncome() {
@@ -695,15 +752,18 @@ function saveMatchToHistory() {
 
     let credPrimary = parseInt(document.getElementById('hist-cred-primary')?.value) || 0;
     let credSecondary = parseInt(document.getElementById('hist-cred-secondary')?.value) || 0;
+    let totalCredits = credPrimary + credSecondary;
 
-    // Territoire Corpse Farm (voir battleCreditsPerOOA dans db.territories) :
-    // +X crédits par ennemi mis hors de combat pendant la partie, ajoutés
-    // automatiquement (voir aussi l'affichage informatif dans renderPostBattleView).
-    let battleTerritoryDef = (typeof gameScores !== 'undefined' && gameScores) ? getTerritoryDef(gameScores.territoryId) : null;
-    let totalEnemiesOOAForCredits = (typeof currentGameRoster !== 'undefined' ? currentGameRoster : []).reduce((sum, m) => sum + ((m.liveXP && m.liveXP.ooaKills) ? m.liveXP.ooaKills : 0), 0);
-    let corpseFarmBonus = (battleTerritoryDef && battleTerritoryDef.battleCreditsPerOOA) ? totalEnemiesOOAForCredits * battleTerritoryDef.battleCreditsPerOOA : 0;
-
-    let totalCredits = credPrimary + credSecondary + corpseFarmBonus;
+    // Territoire "Corpse farm" en jeu pour cette partie : +10 crédits par
+    // ennemi mis hors de combat (voir activeGameTerritory, fixé au lancement
+    // de la partie et toujours actif à ce stade post-bataille).
+    let corpseFarmBonus = 0;
+    if (typeof activeGameTerritory !== 'undefined' && activeGameTerritory && activeGameTerritory.id === 'ter_corpse_farm') {
+        let totalEnemiesOOA = (typeof currentGameRoster !== 'undefined' ? currentGameRoster : [])
+            .reduce((sum, m) => sum + ((m.liveXP && m.liveXP.ooaKills) ? m.liveXP.ooaKills : 0), 0);
+        corpseFarmBonus = totalEnemiesOOA * 10;
+        totalCredits += corpseFarmBonus;
+    }
 
     let repChange = parseInt(document.getElementById('hist-rep')?.value) || 0;
 
@@ -738,11 +798,15 @@ function saveMatchToHistory() {
         result: result,
         primaryCredits: credPrimary,
         secondaryCredits: credSecondary,
-        territoryBonusCredits: corpseFarmBonus,
+        corpseFarmBonus: corpseFarmBonus,
         totalCredits: totalCredits,
         repChange: repChange,
         territory: territorySummary
     });
+
+    if (corpseFarmBonus > 0) {
+        showToast(`Territoire Corpse farm : +${corpseFarmBonus} cr (ennemis mis hors de combat) ajoutés aux gains.`, "success");
+    }
 
     safeSave();
     updateGameTopBar();
