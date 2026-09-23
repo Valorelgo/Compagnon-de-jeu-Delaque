@@ -1418,6 +1418,21 @@ function adjLiveXP(fighterIdx, key, delta) {
     renderGameView(document.getElementById('main-content'));
 }
 
+// XP d'Objectif : limité à 1 seule fois par partie. Une fois cliqué, le
+// bouton disparaît (remplacé par un badge "Rempli") jusqu'à la prochaine
+// partie (liveXP est propre à chaque combat, remis à zéro au lancement
+// d'une nouvelle partie).
+function claimObjectiveXP(fighterIdx) {
+    let m = currentGameRoster[fighterIdx];
+    if (!m) return;
+    if (!m.liveXP) {
+        m.liveXP = { assistance: 0, objective: 0, seriouslyInjured: 0, scenario: 0, ooaKills: 0 };
+    }
+    if (m.liveXP.objective > 0) return;
+    m.liveXP.objective = 1;
+    renderGameView(document.getElementById('main-content'));
+}
+
 // Valeur en XP d'un ennemi mis Hors de Combat / Sérieusement blessé par le
 // guerrier, incluant le bonus du territoire "Fighting pit" (+1 XP par
 // occurrence) si celui-ci est en jeu pour cette partie (voir activeGameTerritory).

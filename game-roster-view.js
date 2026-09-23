@@ -100,21 +100,16 @@ function renderGameView(container) {
                         </div>
                         <div style="display:flex; align-items:center; gap:3px;">
                             <span>Objectif:</span>
-                            <button class="btn" style="padding:0 4px; font-size:10px;" onclick="adjLiveXP(${idx}, 'objective', -1)">-</button>
-                            <strong>${lx.objective}</strong>
-                            <button class="btn" style="padding:0 4px; font-size:10px;" onclick="adjLiveXP(${idx}, 'objective', 1)">+</button>
+                            ${lx.objective > 0
+                                ? `<span style="color:#2ecc71; font-weight:bold; font-size:11px;">✓ Rempli (+1 XP)</span>`
+                                : `<button class="btn btn-cyan" style="padding:1px 6px; font-size:10px;" onclick="claimObjectiveXP(${idx})">+1 XP</button>`
+                            }
                         </div>
                         <div style="display:flex; align-items:center; gap:3px;">
                             <span>Sér. Blessé:</span>
                             <button class="btn" style="padding:0 4px; font-size:10px;" onclick="adjLiveXP(${idx}, 'seriouslyInjured', -1)">-</button>
                             <strong>${lx.seriouslyInjured}</strong>
                             <button class="btn" style="padding:0 4px; font-size:10px;" onclick="adjLiveXP(${idx}, 'seriouslyInjured', 1)">+</button>
-                        </div>
-                        <div style="display:flex; align-items:center; gap:3px;">
-                            <span>Scénario:</span>
-                            <button class="btn" style="padding:0 4px; font-size:10px;" onclick="adjLiveXP(${idx}, 'scenario', -1)">-</button>
-                            <strong>${lx.scenario}</strong>
-                            <button class="btn" style="padding:0 4px; font-size:10px;" onclick="adjLiveXP(${idx}, 'scenario', 1)">+</button>
                         </div>
                         <div style="display:flex; align-items:center; gap:3px;">
                             <span style="color:#e74c3c; font-weight:bold;">OOA:</span>
